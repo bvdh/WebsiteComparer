@@ -4,7 +4,7 @@ export type SyncControllerOptions = {
   leftIframe: HTMLIFrameElement | null;
   rightIframe: HTMLIFrameElement | null;
   enabled: boolean;
-  onNavigate: (from: PaneSide, absoluteUrl: string) => void;
+  onNavigate: (from: PaneSide, absoluteUrl: string, messageType: "bridge:navigate" | "bridge:location") => void;
 };
 
 const LOCK_MS = 150;
@@ -53,12 +53,12 @@ export class SyncController {
       return;
     }
 
-    if (!options.enabled) {
-      debug("ignored message because sync disabled", { sourceSide, messageType: message.type });
-      return;
-    }
-
     if (message.type === "bridge:scroll") {
+      if (!options.enabled) {
+        debug("ignored scroll message because sync disabled", { sourceSide, messageType: message.type });
+        return;
+      }
+
       debug("routing scroll message", { sourceSide, ratio: message.ratio, anchor: message.anchor });
       this.syncScroll(sourceSide, message.ratio, message.anchor, options);
       return;
@@ -66,7 +66,7 @@ export class SyncController {
 
     if ((message.type === "bridge:navigate" || message.type === "bridge:location") && message.url) {
       debug("routing navigation message", { sourceSide, url: message.url, type: message.type });
-      options.onNavigate(sourceSide, message.url);
+      options.onNavigate(sourceSide, message.url, message.type);
     }
   }
 

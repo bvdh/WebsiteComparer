@@ -155,18 +155,61 @@ function App() {
   }, []);
 
   const handleBridgeNavigate = useCallback(
-    (side: PaneSide, absoluteUrl: string) => {
+    (side: PaneSide, absoluteUrl: string, messageType: "bridge:navigate" | "bridge:location") => {
+      if (messageType !== "bridge:navigate") {
+        return;
+      }
+
       const sourceBase = side === "left" ? leftBase : rightBase;
       const peerBase = side === "left" ? rightBase : leftBase;
 
       const relative = toRelativePath(absoluteUrl, sourceBase);
       if (!relative) {
+        if (DEBUG_SYNC) {
+          // eslint-disable-next-line no-console
+          console.debug("[compare-app] ignored navigate; URL is outside mapped base", {
+            side,
+            absoluteUrl,
+            sourceBase,
+          });
+        }
         return;
       }
 
-      // Only sync pages that can map onto the peer base.
-      mapPathToPeer(relative, peerBase);
+      // Validate peer mapping but do not block same-base navigation if peer base is temporarily invalid.
+      try {
+        mapPathToPeer(relative, peerBase);
+      } catch (error) {
+        if (DEBUG_SYNC) {
+          // eslint-disable-next-line no-console
+          console.debug("[compare-app] peer mapping failed; continuing with path navigation", {
+            side,
+            relative,
+            peerBase,
+            error,
+          });
+        }
+      }
+
+      if (DEBUG_SYNC) {
+        // eslint-disable-next-line no-console
+        console.debug("[compare-app] calling navigateTo", {
+          side,
+          absoluteUrl,
+          relative,
+        });
+      }
+
       navigateTo(relative, "push");
+
+      if (DEBUG_SYNC) {
+        // eslint-disable-next-line no-console
+        console.debug("[compare-app] navigated comparer path for mapped link", {
+          side,
+          absoluteUrl,
+          relative,
+        });
+      }
     },
     [leftBase, navigateTo, rightBase]
   );

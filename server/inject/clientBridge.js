@@ -193,6 +193,13 @@
         return;
       }
 
+      // eslint-disable-next-line no-console
+      console.log(`[compare-bridge:${side}] link clicked`, {
+        href: anchor.getAttribute("href"),
+        resolvedHref: anchor.href,
+        target: anchor.target || "_self",
+      });
+
       if (anchor.target && anchor.target !== "_self") {
         return;
       }
@@ -206,7 +213,9 @@
         return;
       }
 
-      const resolved = new URL(href, window.location.href);
+      // Resolve against the document base (including injected <base>) so relative links
+      // map to the upstream site, not the local /api/render proxy URL.
+      const resolved = new URL(href, document.baseURI || window.location.href);
       event.preventDefault();
       debug("intercept link click", { href: resolved.href });
       post({ type: "bridge:navigate", url: resolved.href });
