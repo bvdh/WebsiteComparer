@@ -3,6 +3,8 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { diffLines } from "diff";
+import { marked } from "marked";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +16,11 @@ const distPath = path.resolve(__dirname, "..", "dist");
 
 const bridgeScriptPath = path.join(__dirname, "inject", "clientBridge.js");
 const bridgeScript = fs.readFileSync(bridgeScriptPath, "utf8");
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
 
 app.use(cors());
 
@@ -68,8 +75,41 @@ const resolveTargetUrl = (baseUrl, logicalPath) => {
   return resolved;
 };
 
+const HTTP_URL_IN_TEXT = /https?:\/\/[^\s<>"]+/g;
+
+const normalizeAbsoluteUrlForBase = (urlValue, baseUrl) => {
+  try {
+    const parsed = new URL(urlValue);
+    if (parsed.origin !== baseUrl.origin) {
+      return urlValue;
+    }
+
+    const baseDir = baseDirectoryPath(baseUrl);
+    if (!parsed.pathname.startsWith(baseDir)) {
+      return urlValue;
+    }
+
+    const suffix = parsed.pathname.slice(baseDir.length);
+    const normalizedPath = suffix ? `/${suffix}` : "/";
+    return `${normalizedPath}${parsed.search}${parsed.hash}`;
+  } catch {
+    return urlValue;
+  }
+};
+
+const normalizeMarkdownUrlsForBase = (markdown, baseUrl) =>
+  markdown.replace(HTTP_URL_IN_TEXT, (match) => normalizeAbsoluteUrlForBase(match, baseUrl));
+
 const removeCspMeta = (html) =>
   html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, "");
+
+const escapeHtml = (value) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 const injectBridge = (html, side, targetUrl) => {
   const sanitized = removeCspMeta(html);
@@ -86,6 +126,297 @@ const injectBridge = (html, side, targetUrl) => {
   return `${bridgeTag}\n${baseTag}\n${sanitized}`;
 };
 
+const renderMarkdownDocument = (markdown, side, targetUrl) => {
+  const title = escapeHtml(path.posix.basename(targetUrl.pathname) || "Markdown");
+  const body = marked.parse(markdown);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px 28px 48px;
+      background: #fff;
+      color: #1c1a14;
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .markdown-page {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .markdown-page > :first-child {
+      margin-top: 0;
+    }
+
+    .markdown-page > :last-child {
+      margin-bottom: 0;
+    }
+
+    .markdown-page h1,
+    .markdown-page h2,
+    .markdown-page h3,
+    .markdown-page h4,
+    .markdown-page h5,
+    .markdown-page h6 {
+      line-height: 1.2;
+      margin: 1.4em 0 0.6em;
+    }
+
+    .markdown-page h1 { font-size: 2.2rem; }
+    .markdown-page h2 { font-size: 1.75rem; }
+    .markdown-page h3 { font-size: 1.35rem; }
+
+    .markdown-page p,
+    .markdown-page ul,
+    .markdown-page ol,
+    .markdown-page blockquote,
+    .markdown-page pre,
+    .markdown-page table {
+      margin: 0 0 1rem;
+    }
+
+    .markdown-page a {
+      color: #1f6f78;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 0.15em;
+    }
+
+    .markdown-page blockquote {
+      border-left: 4px solid #c8c0ad;
+      padding: 0.2rem 0 0.2rem 1rem;
+      color: #5a5447;
+    }
+
+    .markdown-page pre {
+      overflow: auto;
+      padding: 1rem 1.1rem;
+      border-radius: 12px;
+      background: #f6f4ee;
+    }
+
+    .markdown-page code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+      background: #f6f4ee;
+      padding: 0.1rem 0.28rem;
+      border-radius: 6px;
+    }
+
+    .markdown-page pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .markdown-page table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .markdown-page th,
+    .markdown-page td {
+      border: 1px solid #c8c0ad;
+      padding: 0.5rem 0.7rem;
+      vertical-align: top;
+    }
+
+    .markdown-page img {
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <main class="markdown-page">${body}</main>
+</body>
+</html>`;
+
+  return injectBridge(html, side, targetUrl);
+};
+
+const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => {
+  const title = escapeHtml(path.posix.basename(targetUrl.pathname) || "Markdown diff");
+  const canonicalSegments = side === "left" ? diffLines(markdown, peerMarkdown) : diffLines(peerMarkdown, markdown);
+
+  const segments = canonicalSegments.map((part) => {
+    const lineCount = Math.max(1, part.value.split("\n").length);
+    const isCurrentContent = part.added ? side === "right" : part.removed ? side === "left" : true;
+
+    if (!isCurrentContent) {
+      return `
+      <section class="markdown-diff-block markdown-diff-block--removed markdown-diff-block--placeholder" style="--markdown-diff-lines: ${lineCount};">
+        <div class="markdown-diff-placeholder" aria-hidden="true"></div>
+      </section>
+    `;
+    }
+
+    const blockClass = part.added
+      ? "markdown-diff-block markdown-diff-block--added"
+      : part.removed
+        ? "markdown-diff-block markdown-diff-block--removed"
+        : "markdown-diff-block markdown-diff-block--same";
+
+    return `
+      <section class="${blockClass}">
+        <div class="markdown-diff-content">${marked.parse(part.value)}</div>
+      </section>
+    `;
+  });
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px 28px 48px;
+      background: #fff;
+      color: #1c1a14;
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .markdown-page {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .markdown-page > :first-child {
+      margin-top: 0;
+    }
+
+    .markdown-page > :last-child {
+      margin-bottom: 0;
+    }
+
+    .markdown-page h1,
+    .markdown-page h2,
+    .markdown-page h3,
+    .markdown-page h4,
+    .markdown-page h5,
+    .markdown-page h6 {
+      line-height: 1.2;
+      margin: 1.4em 0 0.6em;
+    }
+
+    .markdown-page h1 { font-size: 2.2rem; }
+    .markdown-page h2 { font-size: 1.75rem; }
+    .markdown-page h3 { font-size: 1.35rem; }
+
+    .markdown-page p,
+    .markdown-page ul,
+    .markdown-page ol,
+    .markdown-page blockquote,
+    .markdown-page pre,
+    .markdown-page table {
+      margin: 0 0 1rem;
+    }
+
+    .markdown-page a {
+      color: #1f6f78;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 0.15em;
+    }
+
+    .markdown-page blockquote {
+      border-left: 4px solid #c8c0ad;
+      padding: 0.2rem 0 0.2rem 1rem;
+      color: #5a5447;
+    }
+
+    .markdown-page pre {
+      overflow: auto;
+      padding: 1rem 1.1rem;
+      border-radius: 12px;
+      background: #f6f4ee;
+    }
+
+    .markdown-page code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+      background: #f6f4ee;
+      padding: 0.1rem 0.28rem;
+      border-radius: 6px;
+    }
+
+    .markdown-page pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .markdown-page table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .markdown-page th,
+    .markdown-page td {
+      border: 1px solid #c8c0ad;
+      padding: 0.5rem 0.7rem;
+      vertical-align: top;
+    }
+
+    .markdown-page img {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .markdown-diff-block {
+      margin: 0 0 1rem;
+      padding: 0.85rem 1rem;
+      border-radius: 14px;
+      border-left: 6px solid transparent;
+    }
+
+    .markdown-diff-block--added {
+      background: #eef8f0;
+      border-left-color: #2f9e44;
+    }
+
+    .markdown-diff-block--removed {
+      background: #fff5f5;
+      border-left-color: #c92a2a;
+      opacity: 0.9;
+    }
+
+    .markdown-diff-block--placeholder {
+      min-height: calc(var(--markdown-diff-lines, 1) * 1.6rem + 1.7rem);
+      display: flex;
+      align-items: center;
+    }
+
+    .markdown-diff-placeholder {
+      width: 100%;
+      min-height: 1.6rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="markdown-page">
+    ${segments.join("\n")}
+  </main>
+</body>
+</html>`;
+
+  return injectBridge(html, side, targetUrl);
+};
+
 app.get("/api/bridge.js", (req, res) => {
   const side = typeof req.query.side === "string" ? req.query.side : "unknown";
 
@@ -95,6 +426,7 @@ app.get("/api/bridge.js", (req, res) => {
 
 app.get("/api/render", async (req, res) => {
   const base = typeof req.query.base === "string" ? req.query.base : "";
+  const peerBase = typeof req.query.peerBase === "string" ? req.query.peerBase : "";
   const side = typeof req.query.side === "string" ? req.query.side : "unknown";
   const pagePath = normalizePath(typeof req.query.path === "string" ? req.query.path : "/");
 
@@ -104,7 +436,9 @@ app.get("/api/render", async (req, res) => {
   }
 
   const targetBase = new URL(base);
+  const peerBaseUrl = isHttpUrl(peerBase) ? new URL(peerBase) : null;
   const targetUrl = resolveTargetUrl(targetBase, pagePath);
+  const peerUrl = peerBaseUrl ? resolveTargetUrl(peerBaseUrl, pagePath) : null;
 
   try {
     const upstream = await fetch(targetUrl, {
@@ -116,6 +450,7 @@ app.get("/api/render", async (req, res) => {
     });
 
     const contentType = upstream.headers.get("content-type") || "";
+    const isMarkdown = targetUrl.pathname.toLowerCase().endsWith(".md") || contentType.includes("markdown");
 
     if (contentType.includes("text/html")) {
       const html = await upstream.text();
@@ -123,6 +458,44 @@ app.get("/api/render", async (req, res) => {
       res.status(upstream.status);
       res.setHeader("content-type", "text/html; charset=utf-8");
       res.send(instrumented);
+      return;
+    }
+
+    if (isMarkdown) {
+      const markdown = await upstream.text();
+      if (peerUrl) {
+        try {
+          const peerUpstream = await fetch(peerUrl, {
+            headers: {
+              "user-agent": "comparesites-proxy/1.0",
+              accept: "text/markdown,text/plain,application/octet-stream;q=0.8,*/*;q=0.5",
+            },
+            redirect: "follow",
+          });
+
+          const peerContentType = peerUpstream.headers.get("content-type") || "";
+          const peerIsMarkdown = peerUrl.pathname.toLowerCase().endsWith(".md") || peerContentType.includes("markdown");
+
+          if (peerIsMarkdown && peerBaseUrl) {
+            const peerMarkdown = await peerUpstream.text();
+            const comparableMarkdown = normalizeMarkdownUrlsForBase(markdown, targetBase);
+            const comparablePeerMarkdown = normalizeMarkdownUrlsForBase(peerMarkdown, peerBaseUrl);
+            const rendered = renderMarkdownDiffDocument(comparableMarkdown, comparablePeerMarkdown, side, targetUrl);
+            res.status(upstream.status);
+            res.setHeader("content-type", "text/html; charset=utf-8");
+            res.send(rendered);
+            return;
+          }
+        } catch (peerError) {
+          // Fall back to the local markdown render if the peer document cannot be fetched.
+          console.warn("[compare-sites] markdown peer fetch failed; rendering single document", peerError);
+        }
+      }
+
+      const rendered = renderMarkdownDocument(markdown, side, targetUrl);
+      res.status(upstream.status);
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.send(rendered);
       return;
     }
 

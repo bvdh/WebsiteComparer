@@ -52,6 +52,35 @@ const writeQueryState = (mode: "push" | "replace", leftBase: string, rightBase: 
 const normalizeText = (value: string | null | undefined): string =>
   (value || "").replace(/\s+/g, " ").trim();
 
+const getPathVariant = (value: string): "md" | "html" | null => {
+  const parsed = new URL(normalizeRelativePath(value), "http://local.invalid");
+  if (/\.md$/i.test(parsed.pathname)) {
+    return "md";
+  }
+
+  if (/\.html$/i.test(parsed.pathname)) {
+    return "html";
+  }
+
+  return null;
+};
+
+const switchPathVariant = (value: string): string | null => {
+  const parsed = new URL(normalizeRelativePath(value), "http://local.invalid");
+
+  if (/\.md$/i.test(parsed.pathname)) {
+    parsed.pathname = parsed.pathname.replace(/\.md$/i, ".html");
+    return normalizeRelativePath(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+  }
+
+  if (/\.html$/i.test(parsed.pathname)) {
+    parsed.pathname = parsed.pathname.replace(/\.html$/i, ".md");
+    return normalizeRelativePath(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+  }
+
+  return null;
+};
+
 const ensureDiffStyles = (doc: Document): void => {
   if (doc.getElementById("compare-diff-style")) {
     return;
@@ -115,6 +144,24 @@ const getComparableElements = (doc: Document): HTMLElement[] =>
 
     return normalizeText(element.innerText || element.textContent).length > 0;
   });
+
+const getElementText = (element: HTMLElement | undefined): string =>
+  normalizeText(element?.innerText || element?.textContent);
+
+const countElementTexts = (elements: HTMLElement[]): Map<string, number> => {
+  const counts = new Map<string, number>();
+
+  elements.forEach((element) => {
+    const text = getElementText(element);
+    if (!text) {
+      return;
+    }
+
+    counts.set(text, (counts.get(text) || 0) + 1);
+  });
+
+  return counts;
+};
 
 function App() {
   const initialState = useMemo(() => readInitialStateFromQuery(), []);
@@ -241,13 +288,15 @@ function App() {
   }, [leftBase, relativePath, rightBase]);
 
   const leftSrc = useMemo(
-    () => `/api/render?side=left&base=${encodeURIComponent(leftBase)}&path=${encodeURIComponent(relativePath)}`,
-    [leftBase, relativePath]
+    () =>
+      `/api/render?side=left&base=${encodeURIComponent(leftBase)}&peerBase=${encodeURIComponent(rightBase)}&path=${encodeURIComponent(relativePath)}`,
+    [leftBase, relativePath, rightBase]
   );
 
   const rightSrc = useMemo(
-    () => `/api/render?side=right&base=${encodeURIComponent(rightBase)}&path=${encodeURIComponent(relativePath)}`,
-    [relativePath, rightBase]
+    () =>
+      `/api/render?side=right&base=${encodeURIComponent(rightBase)}&peerBase=${encodeURIComponent(leftBase)}&path=${encodeURIComponent(relativePath)}`,
+    [leftBase, relativePath, rightBase]
   );
 
   const leftResolvedUrl = useMemo(() => mapPathToPeer(relativePath, leftBase), [leftBase, relativePath]);
@@ -259,6 +308,18 @@ function App() {
     setRightBase(rightBaseDraft.trim());
     navigateTo(relativePathDraft, "replace");
   }, [leftBaseDraft, navigateTo, relativePathDraft, rightBaseDraft]);
+
+  const pathVariant = useMemo(() => getPathVariant(relativePath), [relativePath]);
+  const canTogglePathVariant = pathVariant !== null;
+
+  const togglePathVariant = useCallback(() => {
+    const nextPath = switchPathVariant(relativePath);
+    if (!nextPath) {
+      return;
+    }
+
+    navigateTo(nextPath, "push");
+  }, [navigateTo, relativePath]);
 
   const canGoBack = historyState.index > 0;
   const canGoForward = historyState.index < historyState.entries.length - 1;
@@ -292,37 +353,28 @@ function App() {
 
       const leftElements = getComparableElements(leftDoc);
       const rightElements = getComparableElements(rightDoc);
+      const leftTextCounts = countElementTexts(leftElements);
 
       let nextDiffCount = 0;
       for (let index = 0; index < rightElements.length; index += 1) {
         const rightElement = rightElements[index];
-        const leftElement = leftElements[index];
-        const rightText = normalizeText(rightElement.innerText || rightElement.textContent);
-        const leftText = normalizeText(leftElement?.innerText || leftElement?.textContent);
+        const rightText = getElementText(rightElement);
 
         if (!rightText) {
           continue;
         }
 
-        if (!leftText) {
-          rightElement.classList.add("compare-diff-marker", "compare-diff-marker--added");
-          nextDiffCount += 1;
-          continue;
-        }
-
-        if (rightText !== leftText) {
+        const remainingMatches = leftTextCounts.get(rightText) || 0;
+        if (remainingMatches > 0) {
+          leftTextCounts.set(rightText, remainingMatches - 1);
+        } else {
           rightElement.classList.add("compare-diff-marker", "compare-diff-marker--changed");
           nextDiffCount += 1;
         }
       }
 
-      if (leftElements.length > rightElements.length) {
-        for (let index = rightElements.length; index < leftElements.length; index += 1) {
-          const leftOnlyText = normalizeText(leftElements[index]?.innerText || leftElements[index]?.textContent);
-          if (!leftOnlyText) {
-            continue;
-          }
-
+      for (const [leftOnlyText, remainingCount] of leftTextCounts.entries()) {
+        for (let index = 0; index < remainingCount; index += 1) {
           const marker = rightDoc.createElement("div");
           marker.className = "compare-diff-removed-note";
           marker.textContent = `Removed from right: ${leftOnlyText.slice(0, 220)}`;
@@ -377,6 +429,8 @@ function App() {
         leftBaseUrl={leftBaseDraft}
         rightBaseUrl={rightBaseDraft}
         currentPath={relativePathDraft}
+        pathVariant={pathVariant}
+        canTogglePathVariant={canTogglePathVariant}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
         syncEnabled={syncEnabled}
@@ -384,6 +438,7 @@ function App() {
         onRightBaseUrlChange={setRightBaseDraft}
         onPathChange={setRelativePathDraft}
         onApply={applyBaseUrls}
+        onTogglePathVariant={togglePathVariant}
         onBack={() => goHistory("back")}
         onForward={() => goHistory("forward")}
         onToggleSync={() => setSyncEnabled((current) => !current)}

@@ -89,6 +89,21 @@
   font-weight: 600;
 }
 
+.path-variant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.path-variant-toggle input:disabled {
+  cursor: not-allowed;
+}
+
 .comparison-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

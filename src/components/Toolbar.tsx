@@ -2,6 +2,8 @@ type ToolbarProps = {
   leftBaseUrl: string;
   rightBaseUrl: string;
   currentPath: string;
+  pathVariant: "md" | "html" | null;
+  canTogglePathVariant: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   syncEnabled: boolean;
@@ -9,6 +11,7 @@ type ToolbarProps = {
   onRightBaseUrlChange: (value: string) => void;
   onPathChange: (value: string) => void;
   onApply: () => void;
+  onTogglePathVariant: () => void;
   onBack: () => void;
   onForward: () => void;
   onToggleSync: () => void;
@@ -27,6 +30,16 @@ export function Toolbar(props: ToolbarProps) {
         <label className="sync-toggle">
           <input type="checkbox" checked={props.syncEnabled} onChange={props.onToggleSync} />
           Sync
+        </label>
+        <label className="path-variant-toggle" title="Switch between .html and .md versions of the same path">
+          <span>HTML</span>
+          <input
+            type="checkbox"
+            checked={props.pathVariant === "md"}
+            onChange={props.onTogglePathVariant}
+            disabled={!props.canTogglePathVariant}
+          />
+          <span>MD</span>
         </label>
       </div>
 
