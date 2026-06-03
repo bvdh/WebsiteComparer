@@ -100,6 +100,12 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
+## Docker compose run with forced rebuild
+
+```bash
+docker compose up --force-recreate --build
+```
+
 ## Access from another device
 
 The app now binds to all interfaces. To open it from another device on the same network:
