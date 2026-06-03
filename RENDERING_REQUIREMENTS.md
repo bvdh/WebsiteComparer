@@ -29,10 +29,12 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 5. Diff highlighting in markdown must be word-level only:
    - Left pane: removed/changed words highlighted red.
    - Right pane: added/changed words highlighted green.
+   - Markdown highlights must use the same red/green text and background style settings as HTML page highlights.
 6. In markdown fenced code blocks (including `json`), changed tokens must render with side-specific red/green text and a visible red/green background highlight.
 7. In markdown fenced code blocks (including `json`), long lines must wrap to the code block width instead of causing horizontal overflow.
 8. Corresponding markdown diff blocks should remain horizontally aligned across panes.
 9. Placeholder rows should be minimized and appear only when one side has no corresponding paragraph.
+10. Paragraph spacing in markdown rendering should remain compact in both single markdown view and markdown diff view.
 
 ## Cross-Cutting Requirements
 
@@ -48,7 +50,9 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).
    - Corresponding paragraphs are presented next to each other.
+   - Paragraph spacing is compact in both markdown and markdown diff views.
    - Only changed words are highlighted.
+   - Markdown highlight colors/backgrounds match the HTML page highlight settings.
    - Changed tokens inside fenced `json` blocks show side-specific red/green text and background highlight.
    - Fenced `json` lines wrap within the code block width.
    - No full-page/block red-green tinting.

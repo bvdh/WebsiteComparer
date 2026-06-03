@@ -181,7 +181,7 @@ const renderMarkdownDocument = (markdown, side, targetUrl) => {
     .markdown-page blockquote,
     .markdown-page pre,
     .markdown-page table {
-      margin: 0 0 0.0875rem;
+      margin: 0 0 0.04375rem;
     }
 
     .markdown-page a {
@@ -569,7 +569,7 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
     .markdown-page blockquote,
     .markdown-page pre,
     .markdown-page table {
-      margin: 0 0 1rem;
+      margin: 0 0 0.5rem;
     }
 
     .markdown-page a {
@@ -638,7 +638,11 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
 
     .markdown-word-diff {
       color: ${wordHighlightTextColor};
-      font-weight: 600;
+      background: ${wordHighlightBackgroundColor};
+      border-radius: 0.18em;
+      padding: 0.02em 0.16em;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
     }
 
     .markdown-diff-code {
@@ -671,8 +675,6 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
     }
 
     .markdown-diff-code .markdown-word-diff {
-      background: ${wordHighlightBackgroundColor};
-      border-radius: 0.18em;
       padding: 0 0.12em;
     }
 
