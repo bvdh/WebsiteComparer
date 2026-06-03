@@ -90,48 +90,31 @@ const ensureDiffStyles = (doc: Document): void => {
   style.id = "compare-diff-style";
   style.textContent = `
     .compare-diff-marker {
-      position: relative;
-      border-left: 6px solid transparent;
-      padding-left: 10px !important;
-      margin-left: 2px !important;
+      border-radius: 0.18em;
+      padding: 0.02em 0.16em;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
     }
 
-    .compare-diff-marker--added {
-      border-left-color: #2f9e44 !important;
+    .compare-diff-marker--left-changed {
+      color: #b42318 !important;
+      background: #fde8e8 !important;
     }
 
-    .compare-diff-marker--removed {
-      border-left-color: #c92a2a !important;
-    }
-
-    .compare-diff-marker--changed {
-      border-left-color: #e67700 !important;
-    }
-
-    .compare-diff-removed-note {
-      margin: 6px 0;
-      padding: 8px 10px;
-      font-size: 12px;
-      color: #842029;
-      background: #fff5f5;
-      border-radius: 4px;
-      border-left: 6px solid #c92a2a;
+    .compare-diff-marker--right-changed {
+      color: #2b8a3e !important;
+      background: #e9f7ef !important;
     }
   `;
   doc.head.appendChild(style);
 };
 
 const clearComparisonArtifacts = (doc: Document): void => {
-  doc.querySelectorAll(".compare-diff-removed-note").forEach((node) => {
-    node.remove();
-  });
-
   doc.querySelectorAll(".compare-diff-marker").forEach((node) => {
     node.classList.remove(
       "compare-diff-marker",
-      "compare-diff-marker--added",
-      "compare-diff-marker--removed",
-      "compare-diff-marker--changed"
+      "compare-diff-marker--left-changed",
+      "compare-diff-marker--right-changed"
     );
   });
 };
@@ -347,15 +330,48 @@ function App() {
     }
 
     try {
+      const isMarkdownDiffView =
+        leftDoc.querySelector(".markdown-diff-block") !== null &&
+        rightDoc.querySelector(".markdown-diff-block") !== null;
+
+      if (isMarkdownDiffView) {
+        clearComparisonArtifacts(rightDoc);
+        clearComparisonArtifacts(leftDoc);
+        const markdownDiffCount =
+          leftDoc.querySelectorAll(".markdown-word-diff").length +
+          rightDoc.querySelectorAll(".markdown-word-diff").length;
+        setDiffCount(markdownDiffCount);
+        return;
+      }
+
+      ensureDiffStyles(leftDoc);
       ensureDiffStyles(rightDoc);
       clearComparisonArtifacts(rightDoc);
       clearComparisonArtifacts(leftDoc);
 
       const leftElements = getComparableElements(leftDoc);
       const rightElements = getComparableElements(rightDoc);
-      const leftTextCounts = countElementTexts(leftElements);
+      const leftTextPool = countElementTexts(leftElements);
+      const rightTextPool = countElementTexts(rightElements);
 
       let nextDiffCount = 0;
+      for (let index = 0; index < leftElements.length; index += 1) {
+        const leftElement = leftElements[index];
+        const leftText = getElementText(leftElement);
+
+        if (!leftText) {
+          continue;
+        }
+
+        const remainingMatches = rightTextPool.get(leftText) || 0;
+        if (remainingMatches > 0) {
+          rightTextPool.set(leftText, remainingMatches - 1);
+        } else {
+          leftElement.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+          nextDiffCount += 1;
+        }
+      }
+
       for (let index = 0; index < rightElements.length; index += 1) {
         const rightElement = rightElements[index];
         const rightText = getElementText(rightElement);
@@ -364,21 +380,11 @@ function App() {
           continue;
         }
 
-        const remainingMatches = leftTextCounts.get(rightText) || 0;
+        const remainingMatches = leftTextPool.get(rightText) || 0;
         if (remainingMatches > 0) {
-          leftTextCounts.set(rightText, remainingMatches - 1);
+          leftTextPool.set(rightText, remainingMatches - 1);
         } else {
-          rightElement.classList.add("compare-diff-marker", "compare-diff-marker--changed");
-          nextDiffCount += 1;
-        }
-      }
-
-      for (const [leftOnlyText, remainingCount] of leftTextCounts.entries()) {
-        for (let index = 0; index < remainingCount; index += 1) {
-          const marker = rightDoc.createElement("div");
-          marker.className = "compare-diff-removed-note";
-          marker.textContent = `Removed from right: ${leftOnlyText.slice(0, 220)}`;
-          rightDoc.body.appendChild(marker);
+          rightElement.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
           nextDiffCount += 1;
         }
       }
@@ -400,6 +406,38 @@ function App() {
     }
   }, []);
 
+  const alignMarkdownBlocksAcrossPanes = useCallback(() => {
+    const leftDoc = leftRef.current?.contentDocument;
+    const rightDoc = rightRef.current?.contentDocument;
+
+    if (!leftDoc || !rightDoc) {
+      return;
+    }
+
+    const leftBlocks = Array.from(leftDoc.querySelectorAll<HTMLElement>(".markdown-diff-block"));
+    const rightBlocks = Array.from(rightDoc.querySelectorAll<HTMLElement>(".markdown-diff-block"));
+
+    if (leftBlocks.length === 0 || rightBlocks.length === 0) {
+      return;
+    }
+
+    leftBlocks.forEach((block) => {
+      block.style.minHeight = "";
+    });
+    rightBlocks.forEach((block) => {
+      block.style.minHeight = "";
+    });
+
+    const pairCount = Math.min(leftBlocks.length, rightBlocks.length);
+    for (let index = 0; index < pairCount; index += 1) {
+      const leftBlock = leftBlocks[index];
+      const rightBlock = rightBlocks[index];
+      const alignedHeight = Math.max(leftBlock.offsetHeight, rightBlock.offsetHeight);
+      leftBlock.style.minHeight = `${alignedHeight}px`;
+      rightBlock.style.minHeight = `${alignedHeight}px`;
+    }
+  }, []);
+
   useEffect(() => {
     const leftIframe = leftRef.current;
     const rightIframe = rightRef.current;
@@ -410,18 +448,23 @@ function App() {
     const scheduleDiffUpdate = () => {
       window.setTimeout(() => {
         highlightDiffsInRightPane();
+        window.requestAnimationFrame(() => {
+          alignMarkdownBlocksAcrossPanes();
+        });
       }, 180);
     };
 
     leftIframe.addEventListener("load", scheduleDiffUpdate);
     rightIframe.addEventListener("load", scheduleDiffUpdate);
+    window.addEventListener("resize", scheduleDiffUpdate);
     scheduleDiffUpdate();
 
     return () => {
       leftIframe.removeEventListener("load", scheduleDiffUpdate);
       rightIframe.removeEventListener("load", scheduleDiffUpdate);
+      window.removeEventListener("resize", scheduleDiffUpdate);
     };
-  }, [highlightDiffsInRightPane, leftSrc, rightSrc]);
+  }, [alignMarkdownBlocksAcrossPanes, highlightDiffsInRightPane, leftSrc, rightSrc]);
 
   return (
     <div className="app-shell">
@@ -463,7 +506,7 @@ function App() {
           <strong>History:</strong> {historyState.index + 1}/{historyState.entries.length}
         </div>
         <div>
-          <strong>Right diffs:</strong> {diffCount}
+          <strong>Diffs:</strong> {diffCount}
         </div>
       </footer>
     </div>
