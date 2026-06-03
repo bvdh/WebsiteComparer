@@ -57,6 +57,49 @@ http://localhost:8787
 
 If you want a different port inside the container, pass `-e PORT=<port>` and publish the same port with `-p`.
 
+## Run with Docker Compose
+
+Use Docker Compose when you want a one-command build and run workflow.
+
+Current compose setup in [docker-compose.yml](docker-compose.yml) exposes the app on port `8788`.
+
+1. Build and start in foreground:
+
+```bash
+docker compose up --build
+```
+
+2. Build and start in background:
+
+```bash
+docker compose up --build -d
+```
+
+3. Open:
+
+```text
+http://localhost:8788
+```
+
+4. View logs:
+
+```bash
+docker compose logs -f comparesites
+```
+
+5. Stop and remove containers/network:
+
+```bash
+docker compose down
+```
+
+6. Rebuild from scratch when needed:
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
 ## Access from another device
 
 The app now binds to all interfaces. To open it from another device on the same network:
