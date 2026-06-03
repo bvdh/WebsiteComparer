@@ -3,7 +3,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { diffArrays, diffWordsWithSpace } from "diff";
+import { diffArrays, diffLines, diffWordsWithSpace } from "diff";
 import { marked } from "marked";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -181,7 +181,7 @@ const renderMarkdownDocument = (markdown, side, targetUrl) => {
     .markdown-page blockquote,
     .markdown-page pre,
     .markdown-page table {
-      margin: 0 0 0.6rem;
+      margin: 0 0 0.0875rem;
     }
 
     .markdown-page a {
@@ -353,9 +353,11 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
       })
       .join("");
 
-  const highlightChangedCode = (leftCode, rightCode, sideValue) => {
-    const codeSegments = diffWordsWithSpace(leftCode, rightCode);
-    return codeSegments
+  const splitCodeLines = (value) => value.replace(/\r\n/g, "\n").split("\n");
+
+  const highlightChangedCodeLine = (leftLine, rightLine, sideValue) => {
+    const tokenSegments = diffWordsWithSpace(leftLine, rightLine);
+    return tokenSegments
       .map((part) => {
         if (part.removed && sideValue === "left") {
           return wrapCodeHighlights(part.value);
@@ -372,6 +374,53 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
         return escapeHtml(part.value);
       })
       .join("");
+  };
+
+  const highlightChangedCode = (leftCode, rightCode, sideValue) => {
+    const lineSegments = diffLines(leftCode, rightCode);
+    const rendered = [];
+
+    for (let index = 0; index < lineSegments.length; index += 1) {
+      const part = lineSegments[index];
+
+      if (part.removed && lineSegments[index + 1]?.added) {
+        const removedLines = splitCodeLines(part.value);
+        const addedLines = splitCodeLines(lineSegments[index + 1].value);
+        const pairCount = Math.max(removedLines.length, addedLines.length);
+
+        for (let lineIndex = 0; lineIndex < pairCount; lineIndex += 1) {
+          const leftLine = removedLines[lineIndex] || "";
+          const rightLine = addedLines[lineIndex] || "";
+
+          if (sideValue === "left") {
+            rendered.push(highlightChangedCodeLine(leftLine, rightLine, sideValue));
+          } else {
+            rendered.push(highlightChangedCodeLine(leftLine, rightLine, sideValue));
+          }
+        }
+
+        index += 1;
+        continue;
+      }
+
+      if (part.removed) {
+        if (sideValue === "left") {
+          rendered.push(wrapCodeHighlights(part.value));
+        }
+        continue;
+      }
+
+      if (part.added) {
+        if (sideValue === "right") {
+          rendered.push(wrapCodeHighlights(part.value));
+        }
+        continue;
+      }
+
+      rendered.push(escapeHtml(part.value));
+    }
+
+    return rendered.join("");
   };
 
   const highlightChangedWords = (leftText, rightText, sideValue) => {
@@ -574,8 +623,8 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
     }
 
     .markdown-diff-block {
-      margin: 0 0 0.45rem;
-      padding: 0.6rem 0.75rem;
+      margin: 0 0 0.05rem;
+      padding: 0.105rem 0.1375rem;
       border-radius: 14px;
     }
 
@@ -594,7 +643,8 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
 
     .markdown-diff-code {
       margin: 0;
-      overflow: auto;
+      overflow-x: hidden;
+      overflow-y: auto;
       padding: 1rem 1.1rem;
       border-radius: 12px;
       font-size: 0.95em;
@@ -605,17 +655,19 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
       background: transparent;
       padding: 0;
       border-radius: 0;
-      white-space: pre;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .markdown-diff-code--left {
-      color: #b42318;
-      background: #fde8e8;
+      color: inherit;
+      background: #f6f4ee;
     }
 
     .markdown-diff-code--right {
-      color: #2b8a3e;
-      background: #e9f7ef;
+      color: inherit;
+      background: #f6f4ee;
     }
 
     .markdown-diff-code .markdown-word-diff {
@@ -625,7 +677,7 @@ const renderMarkdownDiffDocument = (markdown, peerMarkdown, side, targetUrl) => 
     }
 
     .markdown-diff-block--placeholder {
-      min-height: calc(var(--markdown-diff-lines, 1) * 1.35rem + 1rem);
+      min-height: calc(var(--markdown-diff-lines, 1) * 0.2875rem + 0.1375rem);
       display: flex;
       align-items: center;
     }
