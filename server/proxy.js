@@ -75,6 +75,72 @@ const resolveTargetUrl = (baseUrl, logicalPath) => {
   return resolved;
 };
 
+const buildFallbackUrls = (primaryUrl) => {
+  const candidates = [];
+  const seen = new Set();
+
+  const addCandidate = (url) => {
+    const href = url.href;
+    if (seen.has(href)) {
+      return;
+    }
+    seen.add(href);
+    candidates.push(new URL(href));
+  };
+
+  addCandidate(primaryUrl);
+
+  const path = primaryUrl.pathname;
+  const hasIndexHtml = path.endsWith("/index.html");
+  const hasEnSegment = path.includes("/en/");
+
+  if (hasIndexHtml) {
+    const withoutIndex = new URL(primaryUrl.href);
+    withoutIndex.pathname = withoutIndex.pathname.slice(0, -"index.html".length);
+    addCandidate(withoutIndex);
+  }
+
+  if (hasEnSegment) {
+    const withoutEn = new URL(primaryUrl.href);
+    withoutEn.pathname = withoutEn.pathname.replace("/en/", "/");
+    addCandidate(withoutEn);
+  }
+
+  if (hasIndexHtml && hasEnSegment) {
+    const withoutEnAndIndex = new URL(primaryUrl.href);
+    withoutEnAndIndex.pathname = withoutEnAndIndex.pathname.replace("/en/", "/");
+    if (withoutEnAndIndex.pathname.endsWith("/index.html")) {
+      withoutEnAndIndex.pathname = withoutEnAndIndex.pathname.slice(0, -"index.html".length);
+    }
+    addCandidate(withoutEnAndIndex);
+  }
+
+  return candidates;
+};
+
+const fetchWithFallback = async (primaryUrl, acceptHeader) => {
+  const candidates = buildFallbackUrls(primaryUrl);
+  let lastResponse = null;
+
+  for (const candidate of candidates) {
+    const response = await fetch(candidate, {
+      headers: {
+        "user-agent": "comparesites-proxy/1.0",
+        accept: acceptHeader,
+      },
+      redirect: "follow",
+    });
+
+    if (response.status !== 404) {
+      return { response, resolvedUrl: candidate };
+    }
+
+    lastResponse = response;
+  }
+
+  return { response: lastResponse, resolvedUrl: primaryUrl };
+};
+
 const HTTP_URL_IN_TEXT = /https?:\/\/[^\s<>"]+/g;
 
 const normalizeAbsoluteUrlForBase = (urlValue, baseUrl) => {
@@ -720,17 +786,14 @@ app.get("/api/render", async (req, res) => {
 
   const targetBase = new URL(base);
   const peerBaseUrl = isHttpUrl(peerBase) ? new URL(peerBase) : null;
-  const targetUrl = resolveTargetUrl(targetBase, pagePath);
-  const peerUrl = peerBaseUrl ? resolveTargetUrl(peerBaseUrl, pagePath) : null;
+  const requestedTargetUrl = resolveTargetUrl(targetBase, pagePath);
+  const requestedPeerUrl = peerBaseUrl ? resolveTargetUrl(peerBaseUrl, pagePath) : null;
 
   try {
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        "user-agent": "comparesites-proxy/1.0",
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-      redirect: "follow",
-    });
+    const { response: upstream, resolvedUrl: targetUrl } = await fetchWithFallback(
+      requestedTargetUrl,
+      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    );
 
     const contentType = upstream.headers.get("content-type") || "";
     const isMarkdown = targetUrl.pathname.toLowerCase().endsWith(".md") || contentType.includes("markdown");
@@ -746,15 +809,12 @@ app.get("/api/render", async (req, res) => {
 
     if (isMarkdown) {
       const markdown = await upstream.text();
-      if (peerUrl) {
+      if (requestedPeerUrl) {
         try {
-          const peerUpstream = await fetch(peerUrl, {
-            headers: {
-              "user-agent": "comparesites-proxy/1.0",
-              accept: "text/markdown,text/plain,application/octet-stream;q=0.8,*/*;q=0.5",
-            },
-            redirect: "follow",
-          });
+          const { response: peerUpstream, resolvedUrl: peerUrl } = await fetchWithFallback(
+            requestedPeerUrl,
+            "text/markdown,text/plain,application/octet-stream;q=0.8,*/*;q=0.5"
+          );
 
           const peerContentType = peerUpstream.headers.get("content-type") || "";
           const peerIsMarkdown = peerUrl.pathname.toLowerCase().endsWith(".md") || peerContentType.includes("markdown");

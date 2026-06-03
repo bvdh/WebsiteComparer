@@ -14,7 +14,13 @@ export function ComparisonPane(props: ComparisonPaneProps) {
       <div className="pane-header">
         <span>{props.title}</span>
       </div>
-      <iframe ref={props.iframeRef} title={`${props.side} pane`} src={props.src} className="pane-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      <iframe
+        ref={props.iframeRef}
+        title={`${props.side} pane`}
+        src={props.src}
+        className="pane-frame"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+      />
     </section>
   );
 }

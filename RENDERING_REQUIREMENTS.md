@@ -41,12 +41,16 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 1. Any generic page-level diff highlighter must not override markdown word-level highlights.
 2. Any markdown-specific logic must not degrade regular HTML page rendering.
 3. Behavior should be deterministic for the same left/right inputs.
+4. Compared pages rendered in iframe panes must allow user-initiated downloads (sandbox must include `allow-downloads`).
+5. Rendering fetches should tolerate stale deep-link patterns by retrying fallback URL variants (for example `/index.html` and legacy `/en/` segments) before failing.
 
 ## Change Checklist (Required Before Merge)
 
 1. Verify regular HTML compare page:
    - Changed content appears red on left and green on right.
    - No vertical diff bars.
+   - Browser console should not report sandbox download blocking for user-initiated downloads.
+   - Legacy deep links using `/index.html` or old `/en/` segment still resolve to a rendered page when an upstream fallback exists.
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).
    - Corresponding paragraphs are presented next to each other.
