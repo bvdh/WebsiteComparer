@@ -20,38 +20,30 @@ type ToolbarProps = {
 export function Toolbar(props: ToolbarProps) {
   return (
     <header className="toolbar">
-      <div className="toolbar-group toolbar-nav">
-        <button type="button" onClick={props.onBack} disabled={!props.canGoBack}>
-          Back
-        </button>
-        <button type="button" onClick={props.onForward} disabled={!props.canGoForward}>
-          Forward
-        </button>
-        <label className="sync-toggle">
+      <div className="toolbar-group toolbar-toggles">
+        <label className="toggle-switch" title="Synchronise scroll position between panes">
           <input type="checkbox" checked={props.syncEnabled} onChange={props.onToggleSync} />
-          Sync
+          <span className="toggle-track">
+            <span className="toggle-thumb" />
+          </span>
+          <span className="toggle-label">Sync</span>
         </label>
-        <label className="path-variant-toggle" title="Switch between .html and .md versions of the same path">
-          <span>HTML</span>
+        <label
+          className="toggle-switch"
+          title="Switch between .html and .md versions of the same path"
+          style={{ opacity: props.canTogglePathVariant ? undefined : 0.45 }}
+        >
           <input
             type="checkbox"
             checked={props.pathVariant === "md"}
             onChange={props.onTogglePathVariant}
             disabled={!props.canTogglePathVariant}
           />
-          <span>MD</span>
+          <span className="toggle-track">
+            <span className="toggle-thumb" />
+          </span>
+          <span className="toggle-label">MD</span>
         </label>
-      </div>
-
-      <div className="toolbar-group toolbar-path">
-        <label htmlFor="pathInput">Path</label>
-        <input
-          id="pathInput"
-          value={props.currentPath}
-          onChange={(event) => props.onPathChange(event.target.value)}
-          placeholder="/"
-          spellCheck={false}
-        />
       </div>
 
       <div className="toolbar-group toolbar-url-grid">
@@ -73,7 +65,24 @@ export function Toolbar(props: ToolbarProps) {
         />
       </div>
 
+      <div className="toolbar-group toolbar-path">
+        <label htmlFor="pathInput">Path</label>
+        <input
+          id="pathInput"
+          value={props.currentPath}
+          onChange={(event) => props.onPathChange(event.target.value)}
+          placeholder="/"
+          spellCheck={false}
+        />
+      </div>
+
       <div className="toolbar-group toolbar-actions">
+        <button type="button" onClick={props.onBack} disabled={!props.canGoBack} title="Back">
+          &#8592;
+        </button>
+        <button type="button" onClick={props.onForward} disabled={!props.canGoForward} title="Forward">
+          &#8594;
+        </button>
         <button type="button" className="apply-button" onClick={props.onApply}>
           Load
         </button>
