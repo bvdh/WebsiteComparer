@@ -216,6 +216,32 @@
       // Resolve against the document base (including injected <base>) so relative links
       // map to the upstream site, not the local /api/render proxy URL.
       const resolved = new URL(href, document.baseURI || window.location.href);
+
+      // Same-page anchor navigation: only the hash differs from the current page.
+      // Let the browser scroll to the element instead of reloading the page.
+      if (resolved.hash) {
+        const currentBase = new URL(document.baseURI || window.location.href);
+        if (
+          resolved.origin === currentBase.origin &&
+          resolved.pathname === currentBase.pathname &&
+          resolved.search === currentBase.search
+        ) {
+          event.preventDefault();
+          let anchorId = resolved.hash.slice(1);
+          try {
+            anchorId = decodeURIComponent(anchorId);
+          } catch (_) {
+            // keep raw value if decoding fails
+          }
+          const el = document.getElementById(anchorId);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth" });
+            debug("scroll to same-page anchor", { anchorId });
+          }
+          return;
+        }
+      }
+
       event.preventDefault();
       debug("intercept link click", { href: resolved.href });
       post({ type: "bridge:navigate", url: resolved.href });

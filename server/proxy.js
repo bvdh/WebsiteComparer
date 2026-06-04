@@ -183,13 +183,25 @@ const injectBridge = (html, side, targetUrl) => {
   const bridgeTag = `<script src="/api/bridge.js?side=${sideValue}" defer></script>`;
   const baseTag = `<base href="${targetUrl.href}">`;
 
+  let anchorScrollTag = "";
+  if (targetUrl.hash) {
+    let anchorId = targetUrl.hash.slice(1);
+    try {
+      anchorId = decodeURIComponent(anchorId);
+    } catch (_) {
+      // keep raw value if decoding fails
+    }
+    const anchorIdJson = JSON.stringify(anchorId);
+    anchorScrollTag = `\n<script>(function(){var id=${anchorIdJson};document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById(id);if(el)el.scrollIntoView();});})();</script>`;
+  }
+
   if (/<head[^>]*>/i.test(sanitized)) {
     // Keep bridge first so /api/bridge.js resolves against the local document URL
     // before the page <base> rewrites URL resolution to the upstream site.
-    return sanitized.replace(/<head[^>]*>/i, (match) => `${match}\n${bridgeTag}\n${baseTag}`);
+    return sanitized.replace(/<head[^>]*>/i, (match) => `${match}\n${bridgeTag}\n${baseTag}${anchorScrollTag}`);
   }
 
-  return `${bridgeTag}\n${baseTag}\n${sanitized}`;
+  return `${bridgeTag}\n${baseTag}${anchorScrollTag}\n${sanitized}`;
 };
 
 const renderMarkdownDocument = (markdown, side, targetUrl) => {
