@@ -52,6 +52,7 @@ export function Toolbar(props: ToolbarProps) {
           id="leftBaseInput"
           value={props.leftBaseUrl}
           onChange={(event) => props.onLeftBaseUrlChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") props.onApply(); }}
           placeholder="http://localhost:3001"
           spellCheck={false}
         />
@@ -60,6 +61,7 @@ export function Toolbar(props: ToolbarProps) {
           id="rightBaseInput"
           value={props.rightBaseUrl}
           onChange={(event) => props.onRightBaseUrlChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") props.onApply(); }}
           placeholder="http://localhost:3002"
           spellCheck={false}
         />
@@ -71,6 +73,7 @@ export function Toolbar(props: ToolbarProps) {
           id="pathInput"
           value={props.currentPath}
           onChange={(event) => props.onPathChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") props.onApply(); }}
           placeholder="/"
           spellCheck={false}
         />

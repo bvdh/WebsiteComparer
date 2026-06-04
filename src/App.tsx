@@ -488,20 +488,11 @@ function App() {
       />
 
       <main className="comparison-grid">
-        <ComparisonPane side="left" title={`Left: ${leftBase}`} src={leftSrc} iframeRef={leftRef} />
-        <ComparisonPane side="right" title={`Right: ${rightBase}`} src={rightSrc} iframeRef={rightRef} />
+        <ComparisonPane side="left" title={leftResolvedUrl} src={leftSrc} iframeRef={leftRef} />
+        <ComparisonPane side="right" title={rightResolvedUrl} src={rightSrc} iframeRef={rightRef} />
       </main>
 
       <footer className="status-bar">
-        <div>
-          <strong>Current path:</strong> {relativePath}
-        </div>
-        <div>
-          <strong>Left target:</strong> {leftResolvedUrl}
-        </div>
-        <div>
-          <strong>Right target:</strong> {rightResolvedUrl}
-        </div>
         <div>
           <strong>History:</strong> {historyState.index + 1}/{historyState.entries.length}
         </div>
