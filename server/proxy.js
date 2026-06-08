@@ -169,6 +169,30 @@ const normalizeMarkdownUrlsForBase = (markdown, baseUrl) =>
 const removeCspMeta = (html) =>
   html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, "");
 
+const removeExecutableScripts = (html) =>
+  html.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/gi, (fullMatch, attributes) => {
+    const typeMatch = attributes.match(/\btype\s*=\s*["']?([^"'\s>]+)["']?/i);
+    const type = (typeMatch?.[1] || "").toLowerCase();
+
+    // Preserve non-executable data scripts that may contain structured metadata.
+    if (type === "application/ld+json" || type === "application/json") {
+      return fullMatch;
+    }
+
+    return "";
+  });
+
+const removeInlineScriptHooks = (html) =>
+  html
+    // Drop inline DOM event handlers (onclick, onload, onerror, ...).
+    .replace(/\s+on[a-z0-9_-]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+on[a-z0-9_-]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\s+on[a-z0-9_-]+\s*=\s*[^\s>]+/gi, "")
+    // Neutralize javascript: URLs that would execute code when clicked.
+    .replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, '$1="#"')
+    .replace(/(href|src)\s*=\s*'\s*javascript:[^']*'/gi, "$1='#'")
+    .replace(/(href|src)\s*=\s*javascript:[^\s>]+/gi, '$1="#"');
+
 const escapeHtml = (value) =>
   value
     .replace(/&/g, "&amp;")
@@ -178,7 +202,9 @@ const escapeHtml = (value) =>
     .replace(/'/g, "&#39;");
 
 const injectBridge = (html, side, targetUrl) => {
-  const sanitized = removeCspMeta(html);
+  const sanitized = removeInlineScriptHooks(
+    removeExecutableScripts(removeCspMeta(html)),
+  );
   const sideValue = encodeURIComponent(side || "unknown");
   const bridgeTag = `<script src="/api/bridge.js?side=${sideValue}" defer></script>`;
   const baseTag = `<base href="${targetUrl.href}">`;
@@ -880,7 +906,33 @@ if (fs.existsSync(distPath)) {
   });
 }
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
   console.log(`CompareSites proxy running at http://${HOST}:${PORT}`);
 });
+
+let isShuttingDown = false;
+
+const shutdown = (signal) => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+  // eslint-disable-next-line no-console
+  console.log(`\nReceived ${signal}. Shutting down CompareSites proxy...`);
+
+  server.close((error) => {
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to close proxy server cleanly", error);
+      process.exit(1);
+      return;
+    }
+
+    process.exit(0);
+  });
+};
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

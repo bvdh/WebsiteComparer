@@ -12,6 +12,12 @@ const DEFAULT_RIGHT_BASE = "http://localhost:3002";
 const DEFAULT_PATH = "/";
 const DEBUG_SYNC = true;
 const DIFF_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,td,th,pre,code,blockquote";
+const DIFF_LOOKAHEAD_WINDOW = 24;
+
+type ComparableNode = {
+  element: HTMLElement;
+  signature: string;
+};
 
 const readInitialStateFromQuery = () => {
   if (typeof window === "undefined") {
@@ -125,25 +131,76 @@ const getComparableElements = (doc: Document): HTMLElement[] =>
       return false;
     }
 
-    return normalizeText(element.innerText || element.textContent).length > 0;
+    return normalizeText(element.textContent).length > 0;
   });
 
 const getElementText = (element: HTMLElement | undefined): string =>
-  normalizeText(element?.innerText || element?.textContent);
+  normalizeText(element?.textContent);
 
-const countElementTexts = (elements: HTMLElement[]): Map<string, number> => {
-  const counts = new Map<string, number>();
-
-  elements.forEach((element) => {
+const createComparableNodes = (elements: HTMLElement[]): ComparableNode[] =>
+  elements.map((element) => {
     const text = getElementText(element);
-    if (!text) {
-      return;
-    }
+    const compactText = text.length > 320 ? `${text.slice(0, 320)}...` : text;
 
-    counts.set(text, (counts.get(text) || 0) + 1);
+    return {
+      element,
+      signature: `${element.tagName}:${compactText}`,
+    };
   });
 
-  return counts;
+const findMatchingOffset = (
+  nodes: ComparableNode[],
+  startIndex: number,
+  targetSignature: string,
+  windowSize: number
+): number => {
+  const lastIndex = Math.min(nodes.length, startIndex + windowSize);
+  for (let index = startIndex; index < lastIndex; index += 1) {
+    if (nodes[index].signature === targetSignature) {
+      return index - startIndex;
+    }
+  }
+
+  return -1;
+};
+
+const getScrollableMetrics = (doc: Document) => {
+  const scrollElement = doc.scrollingElement || doc.documentElement;
+  const viewportHeight =
+    doc.defaultView?.innerHeight || doc.documentElement.clientHeight || scrollElement.clientHeight;
+  const maxScroll = Math.max(scrollElement.scrollHeight - viewportHeight, 0);
+
+  return {
+    scrollElement,
+    maxScroll,
+  };
+};
+
+const getDocumentScrollRatio = (doc: Document): number => {
+  const { scrollElement, maxScroll } = getScrollableMetrics(doc);
+  if (maxScroll <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.max(scrollElement.scrollTop / maxScroll, 0), 1);
+};
+
+const collectRatiosFromElements = (doc: Document, elements: HTMLElement[]): number[] => {
+  const { maxScroll } = getScrollableMetrics(doc);
+  if (maxScroll <= 0 || elements.length === 0) {
+    return [];
+  }
+
+  const scrollTop = doc.defaultView?.scrollY || (doc.scrollingElement?.scrollTop ?? 0);
+  const ratios = new Set<number>();
+
+  elements.forEach((element) => {
+    const absoluteTop = element.getBoundingClientRect().top + scrollTop;
+    const ratio = Math.min(Math.max(absoluteTop / maxScroll, 0), 1);
+    ratios.add(Math.round(ratio * 1000) / 1000);
+  });
+
+  return Array.from(ratios).sort((a, b) => a - b);
 };
 
 function App() {
@@ -157,6 +214,8 @@ function App() {
   const [relativePathDraft, setRelativePathDraft] = useState(initialState.path);
   const [relativePath, setRelativePath] = useState(initialState.path);
   const [diffCount, setDiffCount] = useState(0);
+  const [rightChangeRatios, setRightChangeRatios] = useState<number[]>([]);
+  const [scrollRatio, setScrollRatio] = useState(0);
   const [historyState, setHistoryState] = useState<HistoryState>(() => ({
     ...initialHistoryState(),
     entries: [initialState.path],
@@ -317,6 +376,21 @@ function App() {
     });
   }, []);
 
+  const scrollRightPaneToRatio = useCallback((ratio: number) => {
+    const clamped = Math.min(Math.max(ratio, 0), 1);
+
+    const rightDoc = rightRef.current?.contentDocument;
+    const rightWin = rightRef.current?.contentWindow;
+    if (!rightDoc || !rightWin) {
+      return;
+    }
+
+    const { maxScroll } = getScrollableMetrics(rightDoc);
+    rightWin.scrollTo({ top: maxScroll * clamped, behavior: "auto" });
+
+    setScrollRatio(clamped);
+  }, []);
+
   const highlightDiffsInRightPane = useCallback(() => {
     const leftDoc = leftRef.current?.contentDocument;
     const rightDoc = rightRef.current?.contentDocument;
@@ -341,6 +415,10 @@ function App() {
           leftDoc.querySelectorAll(".markdown-word-diff").length +
           rightDoc.querySelectorAll(".markdown-word-diff").length;
         setDiffCount(markdownDiffCount);
+        const changedRightMarkdownBlocks = Array.from(
+          rightDoc.querySelectorAll<HTMLElement>(".markdown-diff-block")
+        ).filter((block) => block.querySelector(".markdown-word-diff") !== null);
+        setRightChangeRatios(collectRatiosFromElements(rightDoc, changedRightMarkdownBlocks));
         return;
       }
 
@@ -351,45 +429,81 @@ function App() {
 
       const leftElements = getComparableElements(leftDoc);
       const rightElements = getComparableElements(rightDoc);
-      const leftTextPool = countElementTexts(leftElements);
-      const rightTextPool = countElementTexts(rightElements);
+      const leftNodes = createComparableNodes(leftElements);
+      const rightNodes = createComparableNodes(rightElements);
+      const changedRightElements: HTMLElement[] = [];
 
       let nextDiffCount = 0;
-      for (let index = 0; index < leftElements.length; index += 1) {
-        const leftElement = leftElements[index];
-        const leftText = getElementText(leftElement);
+      let leftIndex = 0;
+      let rightIndex = 0;
 
-        if (!leftText) {
+      while (leftIndex < leftNodes.length && rightIndex < rightNodes.length) {
+        const leftNode = leftNodes[leftIndex];
+        const rightNode = rightNodes[rightIndex];
+
+        if (leftNode.signature === rightNode.signature) {
+          leftIndex += 1;
+          rightIndex += 1;
           continue;
         }
 
-        const remainingMatches = rightTextPool.get(leftText) || 0;
-        if (remainingMatches > 0) {
-          rightTextPool.set(leftText, remainingMatches - 1);
-        } else {
-          leftElement.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
-          nextDiffCount += 1;
+        const rightOffset = findMatchingOffset(
+          rightNodes,
+          rightIndex + 1,
+          leftNode.signature,
+          DIFF_LOOKAHEAD_WINDOW
+        );
+        const leftOffset = findMatchingOffset(
+          leftNodes,
+          leftIndex + 1,
+          rightNode.signature,
+          DIFF_LOOKAHEAD_WINDOW
+        );
+
+        if (rightOffset >= 0 && (leftOffset < 0 || rightOffset < leftOffset)) {
+          for (let marker = rightIndex; marker < rightIndex + rightOffset + 1; marker += 1) {
+            const element = rightNodes[marker].element;
+            element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+            changedRightElements.push(element);
+            nextDiffCount += 1;
+          }
+          rightIndex += rightOffset + 1;
+          continue;
         }
+
+        if (leftOffset >= 0 && (rightOffset < 0 || leftOffset < rightOffset)) {
+          for (let marker = leftIndex; marker < leftIndex + leftOffset + 1; marker += 1) {
+            const element = leftNodes[marker].element;
+            element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+            nextDiffCount += 1;
+          }
+          leftIndex += leftOffset + 1;
+          continue;
+        }
+
+        leftNode.element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+        rightNode.element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+        changedRightElements.push(rightNode.element);
+        nextDiffCount += 2;
+        leftIndex += 1;
+        rightIndex += 1;
       }
 
-      for (let index = 0; index < rightElements.length; index += 1) {
-        const rightElement = rightElements[index];
-        const rightText = getElementText(rightElement);
+      for (; leftIndex < leftNodes.length; leftIndex += 1) {
+        const element = leftNodes[leftIndex].element;
+        element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+        nextDiffCount += 1;
+      }
 
-        if (!rightText) {
-          continue;
-        }
-
-        const remainingMatches = leftTextPool.get(rightText) || 0;
-        if (remainingMatches > 0) {
-          leftTextPool.set(rightText, remainingMatches - 1);
-        } else {
-          rightElement.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
-          nextDiffCount += 1;
-        }
+      for (; rightIndex < rightNodes.length; rightIndex += 1) {
+        const element = rightNodes[rightIndex].element;
+        element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+        changedRightElements.push(element);
+        nextDiffCount += 1;
       }
 
       setDiffCount(nextDiffCount);
+      setRightChangeRatios(collectRatiosFromElements(rightDoc, changedRightElements));
       if (DEBUG_SYNC) {
         // eslint-disable-next-line no-console
         console.debug("[compare-diff] updated", {
@@ -399,6 +513,7 @@ function App() {
         });
       }
     } catch (error) {
+      setRightChangeRatios([]);
       if (DEBUG_SYNC) {
         // eslint-disable-next-line no-console
         console.debug("[compare-diff] failed", error);
@@ -466,6 +581,39 @@ function App() {
     };
   }, [alignMarkdownBlocksAcrossPanes, highlightDiffsInRightPane, leftSrc, rightSrc]);
 
+  useEffect(() => {
+    const rightIframe = rightRef.current;
+    if (!rightIframe) {
+      return;
+    }
+
+    const updateFromRightScroll = () => {
+      const rightDoc = rightIframe.contentDocument;
+      if (!rightDoc) {
+        return;
+      }
+
+      setScrollRatio(getDocumentScrollRatio(rightDoc));
+    };
+
+    const attachScrollListener = () => {
+      rightIframe.contentWindow?.addEventListener("scroll", updateFromRightScroll, { passive: true });
+      updateFromRightScroll();
+    };
+
+    const detachScrollListener = () => {
+      rightIframe.contentWindow?.removeEventListener("scroll", updateFromRightScroll);
+    };
+
+    rightIframe.addEventListener("load", attachScrollListener);
+    attachScrollListener();
+
+    return () => {
+      rightIframe.removeEventListener("load", attachScrollListener);
+      detachScrollListener();
+    };
+  }, [rightSrc]);
+
   return (
     <div className="app-shell">
       <Toolbar
@@ -489,6 +637,45 @@ function App() {
 
       <main className="comparison-grid">
         <ComparisonPane side="left" title={leftResolvedUrl} src={leftSrc} iframeRef={leftRef} />
+        <div
+          className="change-slider"
+          role="button"
+          tabIndex={0}
+          aria-label="Jump to right-pane changed position"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const ratio = (event.clientY - rect.top) / rect.height;
+            scrollRightPaneToRatio(ratio);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              scrollRightPaneToRatio(scrollRatio);
+              return;
+            }
+
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              scrollRightPaneToRatio(scrollRatio + 0.05);
+              return;
+            }
+
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              scrollRightPaneToRatio(scrollRatio - 0.05);
+            }
+          }}
+        >
+          {rightChangeRatios.map((ratio) => (
+            <span
+              key={`right-change-${ratio}`}
+              className="change-slider-marker"
+              style={{ top: `${ratio * 100}%` }}
+              aria-hidden="true"
+            />
+          ))}
+          <span className="change-slider-thumb" style={{ top: `${scrollRatio * 100}%` }} aria-hidden="true" />
+        </div>
         <ComparisonPane side="right" title={rightResolvedUrl} src={rightSrc} iframeRef={rightRef} />
       </main>
 

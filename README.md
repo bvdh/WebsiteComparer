@@ -33,6 +33,19 @@ npm run dev
 
 4. Open the Vite URL shown in Terminal B (usually `http://localhost:5173`).
 
+### Stopping the proxy server
+
+- `npm run dev:server` runs in the foreground and should stop with `Ctrl+C`.
+- If it does not stop as expected, an older proxy process is likely still running in another terminal.
+
+Use these commands to reset and restart cleanly:
+
+```bash
+pgrep -af "node server/proxy.js"
+pkill -f "node server/proxy.js"
+npm run dev:server
+```
+
 ## Run with Docker
 
 The Docker image builds the frontend and serves both the React app and the proxy API from the same Express process on port `8787`.
