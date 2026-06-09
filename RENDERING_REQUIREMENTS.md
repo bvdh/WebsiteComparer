@@ -17,7 +17,9 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 3. Visual diff marking for regular HTML pages must be side-specific:
    - Left pane changed-only content: red styling.
    - Right pane changed-only content: green styling.
-4. A center vertical change navigator bar must be shown between panes with orange markers for positions where the right pane has changed sections.
+4. A center vertical change navigator bar must be shown between panes with side-specific markers for changed sections:
+   - Red markers for left-pane removed/changed sections.
+   - Green markers for right-pane added/changed sections.
 5. Clicking any point in the center change navigator bar must jump to the corresponding vertical position in the right pane.
 6. Existing, unchanged content must remain visually neutral.
 
@@ -46,17 +48,19 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 5. Rendering fetches should tolerate stale deep-link patterns by retrying fallback URL variants (for example `/index.html` and legacy `/en/` segments) before failing.
 6. Executable upstream page scripts must be stripped from rendered compare iframes to avoid repeated runtime script errors and unstable client-side reinitialization loops.
 7. Inline script execution hooks in upstream HTML (for example `onload`, `onclick`, and `javascript:` links) must be stripped or neutralized in rendered compare iframes.
-6. For long documents with repeated section text, page-level diff matching should use bounded local alignment to avoid overmatching distant repeated content and to keep rendering responsive.
+8. For long documents with repeated section text, page-level diff matching should use bounded local alignment to avoid overmatching distant repeated content and to keep rendering responsive.
+9. For sanitized HTML pages that use Bootstrap-style header dropdown toggles, compare iframes must provide bridge-side fallback toggle behavior so menu sections can expand/collapse without upstream executable scripts.
 
 ## Change Checklist (Required Before Merge)
 
 1. Verify regular HTML compare page:
    - Changed content appears red on left and green on right.
-   - Center change navigator bar is visible with orange markers for right-pane changed sections.
+   - Center change navigator bar is visible with red markers for left-pane removed/changed sections and green markers for right-pane added/changed sections.
    - Clicking the center change navigator bar jumps to the matching vertical position in the right pane.
    - Browser console should not report sandbox download blocking for user-initiated downloads.
    - Browser console should not show repeated upstream script re-execution errors (for example duplicate declaration or undefined global errors from page scripts).
    - Browser console should not show runtime errors caused by inline event attributes calling missing script globals (for example `Uncaught ReferenceError: fhirTableInit is not defined`).
+   - Header dropdown toggles (for example Bootstrap-style nav menus using `data-bs-toggle="dropdown"`) should open and close within each compare pane even when upstream scripts are stripped.
    - Legacy deep links using `/index.html` or old `/en/` segment still resolve to a rendered page when an upstream fallback exists.
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).

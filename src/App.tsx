@@ -19,6 +19,11 @@ type ComparableNode = {
   signature: string;
 };
 
+type ChangeMarker = {
+  ratio: number;
+  side: PaneSide;
+};
+
 const readInitialStateFromQuery = () => {
   if (typeof window === "undefined") {
     return {
@@ -203,6 +208,29 @@ const collectRatiosFromElements = (doc: Document, elements: HTMLElement[]): numb
   return Array.from(ratios).sort((a, b) => a - b);
 };
 
+const collectChangeMarkersFromElements = (
+  doc: Document,
+  elements: HTMLElement[],
+  side: PaneSide
+): ChangeMarker[] => collectRatiosFromElements(doc, elements).map((ratio) => ({ ratio, side }));
+
+const mergeChangeMarkers = (...markerGroups: ChangeMarker[][]): ChangeMarker[] => {
+  const merged = new Map<string, ChangeMarker>();
+
+  markerGroups.flat().forEach((marker) => {
+    const roundedRatio = Math.round(marker.ratio * 1000) / 1000;
+    const key = `${marker.side}:${roundedRatio}`;
+    if (!merged.has(key)) {
+      merged.set(key, {
+        ratio: roundedRatio,
+        side: marker.side,
+      });
+    }
+  });
+
+  return Array.from(merged.values()).sort((a, b) => a.ratio - b.ratio);
+};
+
 function App() {
   const initialState = useMemo(() => readInitialStateFromQuery(), []);
 
@@ -214,7 +242,7 @@ function App() {
   const [relativePathDraft, setRelativePathDraft] = useState(initialState.path);
   const [relativePath, setRelativePath] = useState(initialState.path);
   const [diffCount, setDiffCount] = useState(0);
-  const [rightChangeRatios, setRightChangeRatios] = useState<number[]>([]);
+  const [changeMarkers, setChangeMarkers] = useState<ChangeMarker[]>([]);
   const [scrollRatio, setScrollRatio] = useState(0);
   const [historyState, setHistoryState] = useState<HistoryState>(() => ({
     ...initialHistoryState(),
@@ -418,7 +446,15 @@ function App() {
         const changedRightMarkdownBlocks = Array.from(
           rightDoc.querySelectorAll<HTMLElement>(".markdown-diff-block")
         ).filter((block) => block.querySelector(".markdown-word-diff") !== null);
-        setRightChangeRatios(collectRatiosFromElements(rightDoc, changedRightMarkdownBlocks));
+        const changedLeftMarkdownBlocks = Array.from(
+          leftDoc.querySelectorAll<HTMLElement>(".markdown-diff-block")
+        ).filter((block) => block.querySelector(".markdown-word-diff") !== null);
+        setChangeMarkers(
+          mergeChangeMarkers(
+            collectChangeMarkersFromElements(leftDoc, changedLeftMarkdownBlocks, "left"),
+            collectChangeMarkersFromElements(rightDoc, changedRightMarkdownBlocks, "right")
+          )
+        );
         return;
       }
 
@@ -431,6 +467,7 @@ function App() {
       const rightElements = getComparableElements(rightDoc);
       const leftNodes = createComparableNodes(leftElements);
       const rightNodes = createComparableNodes(rightElements);
+      const changedLeftElements: HTMLElement[] = [];
       const changedRightElements: HTMLElement[] = [];
 
       let nextDiffCount = 0;
@@ -475,6 +512,7 @@ function App() {
           for (let marker = leftIndex; marker < leftIndex + leftOffset + 1; marker += 1) {
             const element = leftNodes[marker].element;
             element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+            changedLeftElements.push(element);
             nextDiffCount += 1;
           }
           leftIndex += leftOffset + 1;
@@ -483,6 +521,7 @@ function App() {
 
         leftNode.element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
         rightNode.element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+        changedLeftElements.push(leftNode.element);
         changedRightElements.push(rightNode.element);
         nextDiffCount += 2;
         leftIndex += 1;
@@ -492,6 +531,7 @@ function App() {
       for (; leftIndex < leftNodes.length; leftIndex += 1) {
         const element = leftNodes[leftIndex].element;
         element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+        changedLeftElements.push(element);
         nextDiffCount += 1;
       }
 
@@ -503,7 +543,12 @@ function App() {
       }
 
       setDiffCount(nextDiffCount);
-      setRightChangeRatios(collectRatiosFromElements(rightDoc, changedRightElements));
+      setChangeMarkers(
+        mergeChangeMarkers(
+          collectChangeMarkersFromElements(leftDoc, changedLeftElements, "left"),
+          collectChangeMarkersFromElements(rightDoc, changedRightElements, "right")
+        )
+      );
       if (DEBUG_SYNC) {
         // eslint-disable-next-line no-console
         console.debug("[compare-diff] updated", {
@@ -513,7 +558,7 @@ function App() {
         });
       }
     } catch (error) {
-      setRightChangeRatios([]);
+      setChangeMarkers([]);
       if (DEBUG_SYNC) {
         // eslint-disable-next-line no-console
         console.debug("[compare-diff] failed", error);
@@ -666,11 +711,11 @@ function App() {
             }
           }}
         >
-          {rightChangeRatios.map((ratio) => (
+          {changeMarkers.map((marker) => (
             <span
-              key={`right-change-${ratio}`}
-              className="change-slider-marker"
-              style={{ top: `${ratio * 100}%` }}
+              key={`${marker.side}-change-${marker.ratio}`}
+              className={`change-slider-marker change-slider-marker--${marker.side}`}
+              style={{ top: `${marker.ratio * 100}%` }}
               aria-hidden="true"
             />
           ))}

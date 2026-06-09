@@ -176,6 +176,64 @@
     return rawHref;
   };
 
+  const closeAllDropdowns = () => {
+    document.querySelectorAll(".dropdown.show").forEach((dropdown) => {
+      dropdown.classList.remove("show");
+    });
+
+    document.querySelectorAll(".dropdown-menu.show").forEach((menu) => {
+      menu.classList.remove("show");
+    });
+
+    document
+      .querySelectorAll("[data-bs-toggle='dropdown'], .dropdown-toggle")
+      .forEach((toggle) => {
+        if (toggle instanceof Element) {
+          toggle.setAttribute("aria-expanded", "false");
+        }
+      });
+  };
+
+  const isDropdownToggleAnchor = (anchor) =>
+    anchor.matches("[data-bs-toggle='dropdown'], .dropdown-toggle") ||
+    (anchor.getAttribute("href") || "").trim() === "#";
+
+  const handleDropdownToggle = (anchor) => {
+    const dropdown = anchor.closest(".dropdown");
+    const menu = dropdown?.querySelector(":scope > .dropdown-menu, .dropdown-menu");
+    if (!(dropdown instanceof HTMLElement) || !(menu instanceof HTMLElement)) {
+      return false;
+    }
+
+    const isOpen = dropdown.classList.contains("show") || menu.classList.contains("show");
+    closeAllDropdowns();
+
+    if (!isOpen) {
+      dropdown.classList.add("show");
+      menu.classList.add("show");
+      anchor.setAttribute("aria-expanded", "true");
+    }
+
+    return true;
+  };
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    if (!target.closest(".dropdown")) {
+      closeAllDropdowns();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeAllDropdowns();
+    }
+  });
+
   document.addEventListener(
     "click",
     (event) => {
@@ -205,6 +263,16 @@
       }
 
       if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      if (isDropdownToggleAnchor(anchor) && handleDropdownToggle(anchor)) {
+        event.preventDefault();
+        event.stopPropagation();
+        debug("handled dropdown toggle", {
+          text: normalizeText(anchor.textContent),
+          href: anchor.getAttribute("href"),
+        });
         return;
       }
 

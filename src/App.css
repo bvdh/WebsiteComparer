@@ -184,9 +184,17 @@
   width: 12px;
   height: 3px;
   border-radius: 6px;
-  background: #f08c00;
+  background: transparent;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
   transform: translateY(-50%);
+}
+
+.change-slider-marker--left {
+  background: #b42318;
+}
+
+.change-slider-marker--right {
+  background: #16a34a;
 }
 
 .change-slider-thumb {
