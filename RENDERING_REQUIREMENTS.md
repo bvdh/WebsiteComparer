@@ -50,6 +50,7 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 7. Inline script execution hooks in upstream HTML (for example `onload`, `onclick`, and `javascript:` links) must be stripped or neutralized in rendered compare iframes.
 8. For long documents with repeated section text, page-level diff matching should use bounded local alignment to avoid overmatching distant repeated content and to keep rendering responsive.
 9. For sanitized HTML pages that use Bootstrap-style header dropdown toggles, compare iframes must provide bridge-side fallback toggle behavior so menu sections can expand/collapse without upstream executable scripts.
+10. Iframe synchronization and diff routines must gracefully handle temporary or redirected cross-origin iframe states without throwing runtime `SecurityError` exceptions in the parent app.
 
 ## Change Checklist (Required Before Merge)
 
@@ -61,6 +62,7 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - Browser console should not show repeated upstream script re-execution errors (for example duplicate declaration or undefined global errors from page scripts).
    - Browser console should not show runtime errors caused by inline event attributes calling missing script globals (for example `Uncaught ReferenceError: fhirTableInit is not defined`).
    - Header dropdown toggles (for example Bootstrap-style nav menus using `data-bs-toggle="dropdown"`) should open and close within each compare pane even when upstream scripts are stripped.
+   - Pages that trigger temporary cross-origin iframe states should still load in compare view without parent-app `SecurityError` crashes (for example blocked access to iframe `addEventListener` or `contentDocument`).
    - Legacy deep links using `/index.html` or old `/en/` segment still resolve to a rendered page when an upstream fallback exists.
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).

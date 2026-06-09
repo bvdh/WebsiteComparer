@@ -22,6 +22,15 @@ const debug = (message: string, details?: unknown): void => {
 export class SyncController {
   private lockUntil: Record<PaneSide, number> = { left: 0, right: 0 };
 
+  private getIframeWindow(iframe: HTMLIFrameElement | null): Window | null {
+    try {
+      return iframe?.contentWindow ?? null;
+    } catch (error) {
+      debug("unable to access iframe window", error);
+      return null;
+    }
+  }
+
   public handleMessage(event: MessageEvent, options: SyncControllerOptions): void {
     const message = event.data as BridgeIncomingMessage | undefined;
     if (!message || message.source !== "compare-bridge") {
@@ -92,7 +101,10 @@ export class SyncController {
     }
 
     const targetSide: PaneSide = sourceSide === "left" ? "right" : "left";
-    const targetWindow = targetSide === "left" ? options.leftIframe?.contentWindow : options.rightIframe?.contentWindow;
+    const targetWindow =
+      targetSide === "left"
+        ? this.getIframeWindow(options.leftIframe)
+        : this.getIframeWindow(options.rightIframe);
 
     if (!targetWindow) {
       debug("failed to forward scroll because target window not ready", { sourceSide, targetSide });
@@ -121,11 +133,14 @@ export class SyncController {
       return null;
     }
 
-    if (source === leftIframe?.contentWindow) {
+    const leftWindow = this.getIframeWindow(leftIframe);
+    const rightWindow = this.getIframeWindow(rightIframe);
+
+    if (leftWindow && source === leftWindow) {
       return "left";
     }
 
-    if (source === rightIframe?.contentWindow) {
+    if (rightWindow && source === rightWindow) {
       return "right";
     }
 

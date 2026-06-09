@@ -231,6 +231,30 @@ const mergeChangeMarkers = (...markerGroups: ChangeMarker[][]): ChangeMarker[] =
   return Array.from(merged.values()).sort((a, b) => a.ratio - b.ratio);
 };
 
+const getIframeDocumentSafe = (iframe: HTMLIFrameElement | null): Document | null => {
+  try {
+    return iframe?.contentDocument ?? null;
+  } catch (error) {
+    if (DEBUG_SYNC) {
+      // eslint-disable-next-line no-console
+      console.debug("[compare-app] unable to access iframe document", error);
+    }
+    return null;
+  }
+};
+
+const getIframeWindowSafe = (iframe: HTMLIFrameElement | null): Window | null => {
+  try {
+    return iframe?.contentWindow ?? null;
+  } catch (error) {
+    if (DEBUG_SYNC) {
+      // eslint-disable-next-line no-console
+      console.debug("[compare-app] unable to access iframe window", error);
+    }
+    return null;
+  }
+};
+
 function App() {
   const initialState = useMemo(() => readInitialStateFromQuery(), []);
 
@@ -407,21 +431,29 @@ function App() {
   const scrollRightPaneToRatio = useCallback((ratio: number) => {
     const clamped = Math.min(Math.max(ratio, 0), 1);
 
-    const rightDoc = rightRef.current?.contentDocument;
-    const rightWin = rightRef.current?.contentWindow;
+    const rightDoc = getIframeDocumentSafe(rightRef.current);
+    const rightWin = getIframeWindowSafe(rightRef.current);
     if (!rightDoc || !rightWin) {
       return;
     }
 
     const { maxScroll } = getScrollableMetrics(rightDoc);
-    rightWin.scrollTo({ top: maxScroll * clamped, behavior: "auto" });
+    try {
+      rightWin.scrollTo({ top: maxScroll * clamped, behavior: "auto" });
+    } catch (error) {
+      if (DEBUG_SYNC) {
+        // eslint-disable-next-line no-console
+        console.debug("[compare-app] unable to scroll right iframe", error);
+      }
+      return;
+    }
 
     setScrollRatio(clamped);
   }, []);
 
   const highlightDiffsInRightPane = useCallback(() => {
-    const leftDoc = leftRef.current?.contentDocument;
-    const rightDoc = rightRef.current?.contentDocument;
+    const leftDoc = getIframeDocumentSafe(leftRef.current);
+    const rightDoc = getIframeDocumentSafe(rightRef.current);
 
     if (!leftDoc || !rightDoc) {
       return;
@@ -567,8 +599,8 @@ function App() {
   }, []);
 
   const alignMarkdownBlocksAcrossPanes = useCallback(() => {
-    const leftDoc = leftRef.current?.contentDocument;
-    const rightDoc = rightRef.current?.contentDocument;
+    const leftDoc = getIframeDocumentSafe(leftRef.current);
+    const rightDoc = getIframeDocumentSafe(rightRef.current);
 
     if (!leftDoc || !rightDoc) {
       return;
@@ -633,7 +665,7 @@ function App() {
     }
 
     const updateFromRightScroll = () => {
-      const rightDoc = rightIframe.contentDocument;
+      const rightDoc = getIframeDocumentSafe(rightIframe);
       if (!rightDoc) {
         return;
       }
@@ -642,12 +674,36 @@ function App() {
     };
 
     const attachScrollListener = () => {
-      rightIframe.contentWindow?.addEventListener("scroll", updateFromRightScroll, { passive: true });
+      const rightWindow = getIframeWindowSafe(rightIframe);
+      if (!rightWindow) {
+        return;
+      }
+
+      try {
+        rightWindow.addEventListener("scroll", updateFromRightScroll, { passive: true });
+      } catch (error) {
+        if (DEBUG_SYNC) {
+          // eslint-disable-next-line no-console
+          console.debug("[compare-app] unable to attach right scroll listener", error);
+        }
+      }
       updateFromRightScroll();
     };
 
     const detachScrollListener = () => {
-      rightIframe.contentWindow?.removeEventListener("scroll", updateFromRightScroll);
+      const rightWindow = getIframeWindowSafe(rightIframe);
+      if (!rightWindow) {
+        return;
+      }
+
+      try {
+        rightWindow.removeEventListener("scroll", updateFromRightScroll);
+      } catch (error) {
+        if (DEBUG_SYNC) {
+          // eslint-disable-next-line no-console
+          console.debug("[compare-app] unable to detach right scroll listener", error);
+        }
+      }
     };
 
     rightIframe.addEventListener("load", attachScrollListener);
