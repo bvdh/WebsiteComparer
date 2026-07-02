@@ -5,6 +5,7 @@ import { initialHistoryState, pushHistory, stepHistory, type HistoryState } from
 import { SyncController } from "./sync/SyncController";
 import { mapPathToPeer, normalizeRelativePath, toRelativePath } from "./sync/urlMapping";
 import type { PaneSide } from "./types/sync";
+import { diffWords, type Change } from "diff";
 import "./App.css";
 
 const DEFAULT_LEFT_BASE = "http://localhost:3001";
@@ -116,11 +117,150 @@ const ensureDiffStyles = (doc: Document): void => {
       color: #2b8a3e !important;
       background: #e9f7ef !important;
     }
+
+    .compare-word-diff {
+      border-radius: 0.18em;
+      padding: 0.02em 0.14em;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+      font-weight: 600;
+    }
+
+    .compare-word-diff--left-changed {
+      color: #7a1712 !important;
+      background: #f2a49d !important;
+    }
+
+    .compare-word-diff--right-changed {
+      color: #14612e !important;
+      background: #9ed7b3 !important;
+    }
   `;
   doc.head.appendChild(style);
 };
 
+const CHANGED_WORD_MAX_CHARS = 20000;
+
+type WordChangeRange = [number, number];
+
+const computeChangedWordRanges = (parts: Change[], side: PaneSide): WordChangeRange[] => {
+  const ranges: WordChangeRange[] = [];
+  let position = 0;
+
+  parts.forEach((part) => {
+    const skip = side === "right" ? part.removed : part.added;
+    if (skip) {
+      return;
+    }
+
+    const length = part.value.length;
+    const isChanged = side === "right" ? part.added : part.removed;
+    if (isChanged && length > 0) {
+      ranges.push([position, position + length]);
+    }
+    position += length;
+  });
+
+  return ranges;
+};
+
+const wrapChangedWordRanges = (
+  doc: Document,
+  root: HTMLElement,
+  ranges: WordChangeRange[],
+  className: string
+): void => {
+  if (ranges.length === 0) {
+    return;
+  }
+
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: { node: Text; start: number; end: number }[] = [];
+  let offset = 0;
+  let current = walker.nextNode();
+  while (current) {
+    const value = current.nodeValue ?? "";
+    textNodes.push({ node: current as Text, start: offset, end: offset + value.length });
+    offset += value.length;
+    current = walker.nextNode();
+  }
+
+  textNodes.forEach(({ node, start, end }) => {
+    const overlaps = ranges
+      .map(([rangeStart, rangeEnd]): WordChangeRange => [Math.max(rangeStart, start), Math.min(rangeEnd, end)])
+      .filter(([overlapStart, overlapEnd]) => overlapEnd > overlapStart)
+      .sort((a, b) => a[0] - b[0]);
+
+    if (overlaps.length === 0) {
+      return;
+    }
+
+    const text = node.nodeValue ?? "";
+    const fragment = doc.createDocumentFragment();
+    let cursor = start;
+
+    overlaps.forEach(([overlapStart, overlapEnd]) => {
+      if (overlapStart > cursor) {
+        fragment.appendChild(doc.createTextNode(text.slice(cursor - start, overlapStart - start)));
+      }
+      const span = doc.createElement("span");
+      span.className = className;
+      span.textContent = text.slice(overlapStart - start, overlapEnd - start);
+      fragment.appendChild(span);
+      cursor = overlapEnd;
+    });
+
+    if (cursor < end) {
+      fragment.appendChild(doc.createTextNode(text.slice(cursor - start)));
+    }
+
+    node.parentNode?.replaceChild(fragment, node);
+  });
+};
+
+// Word-level highlight for a matched-but-changed block pair.
+// Returns the number of changed word ranges, or -1 when the block is too large
+// to word-diff and the caller should fall back to whole-block highlighting.
+const applyWordLevelDiff = (
+  leftDoc: Document,
+  rightDoc: Document,
+  leftElement: HTMLElement,
+  rightElement: HTMLElement
+): number => {
+  const leftText = leftElement.textContent ?? "";
+  const rightText = rightElement.textContent ?? "";
+
+  if (leftText.length > CHANGED_WORD_MAX_CHARS || rightText.length > CHANGED_WORD_MAX_CHARS) {
+    return -1;
+  }
+
+  const parts = diffWords(leftText, rightText);
+  const leftRanges = computeChangedWordRanges(parts, "left");
+  const rightRanges = computeChangedWordRanges(parts, "right");
+
+  wrapChangedWordRanges(leftDoc, leftElement, leftRanges, "compare-word-diff compare-word-diff--left-changed");
+  wrapChangedWordRanges(rightDoc, rightElement, rightRanges, "compare-word-diff compare-word-diff--right-changed");
+
+  return leftRanges.length + rightRanges.length;
+};
+
+const unwrapWordDiffSpans = (doc: Document): void => {
+  doc.querySelectorAll(".compare-word-diff").forEach((span) => {
+    const parent = span.parentNode;
+    if (!parent) {
+      return;
+    }
+
+    while (span.firstChild) {
+      parent.insertBefore(span.firstChild, span);
+    }
+    parent.removeChild(span);
+    parent.normalize();
+  });
+};
+
 const clearComparisonArtifacts = (doc: Document): void => {
+  unwrapWordDiffSpans(doc);
   doc.querySelectorAll(".compare-diff-marker").forEach((node) => {
     node.classList.remove(
       "compare-diff-marker",
@@ -551,8 +691,22 @@ function App() {
           continue;
         }
 
-        leftNode.element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
-        rightNode.element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+        const wordChanges = applyWordLevelDiff(leftDoc, rightDoc, leftNode.element, rightNode.element);
+
+        if (wordChanges === 0) {
+          // Whitespace/formatting-only difference: treat the pair as unchanged so
+          // it does not produce a phantom highlight or change-navigator marker.
+          leftIndex += 1;
+          rightIndex += 1;
+          continue;
+        }
+
+        if (wordChanges < 0) {
+          // Block too large to word-diff: fall back to whole-block highlight.
+          leftNode.element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
+          rightNode.element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
+        }
+
         changedLeftElements.push(leftNode.element);
         changedRightElements.push(rightNode.element);
         nextDiffCount += 2;

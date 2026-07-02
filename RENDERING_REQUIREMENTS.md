@@ -22,6 +22,12 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - Green markers for right-pane added/changed sections.
 5. Clicking any point in the center change navigator bar must jump to the corresponding vertical position in the right pane.
 6. Existing, unchanged content must remain visually neutral.
+7. For HTML blocks that are matched but internally changed (1:1 substitution), diff highlighting must be word-level:
+   - Only the changed words are highlighted; unchanged words in the block remain neutral.
+   - Changed words use a darker/saturated red (left pane) or green (right pane) background to distinguish precise word changes from whole-block add/remove highlights.
+   - Word-level comparison ignores insignificant whitespace/formatting differences.
+8. Whole-block added or removed content (a block present on only one side) continues to use the lighter side-specific red (left) / green (right) background over the entire block.
+9. HTML blocks whose only differences are whitespace/formatting (no word-level changes) must not be marked as changed and must not create change-navigator markers.
 
 ## Markdown Rendering Requirements
 
@@ -63,7 +69,10 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - Browser console should not show runtime errors caused by inline event attributes calling missing script globals (for example `Uncaught ReferenceError: fhirTableInit is not defined`).
    - Header dropdown toggles (for example Bootstrap-style nav menus using `data-bs-toggle="dropdown"`) should open and close within each compare pane even when upstream scripts are stripped.
    - Pages that trigger temporary cross-origin iframe states should still load in compare view without parent-app `SecurityError` crashes (for example blocked access to iframe `addEventListener` or `contentDocument`).
-   - Legacy deep links using `/index.html` or old `/en/` segment still resolve to a rendered page when an upstream fallback exists.
+   - Legacy deep links using `/index.html` or old `/en/` segments still resolve to a rendered page when an upstream fallback exists.
+   - For matched-but-changed blocks, only the changed words are highlighted (unchanged words in the block stay neutral).
+   - Changed words use a darker/saturated red (left) / green (right) background, distinct from the lighter whole-block add/remove highlight.
+   - Blocks that differ only by whitespace/formatting are not marked as changed and add no change-navigator markers.
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).
    - Corresponding paragraphs are presented next to each other.
