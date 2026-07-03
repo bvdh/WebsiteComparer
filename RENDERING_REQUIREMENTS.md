@@ -28,6 +28,7 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - Word-level comparison ignores insignificant whitespace/formatting differences.
 8. Whole-block added or removed content (a block present on only one side) continues to use the lighter side-specific red (left) / green (right) background over the entire block.
 9. HTML blocks whose only differences are whitespace/formatting (no word-level changes) must not be marked as changed and must not create change-navigator markers.
+10. Standalone callout/notice boxes rendered as block `div` containers (for example `div.callout-box` "Ongoing alignment" notices) must participate in HTML block comparison and must not be silently skipped because they are `div` elements. When such a box is present on only one side, or appears at a non-corresponding position relative to surrounding blocks, it must be flagged as a side-specific delete + insert (removed instance red on the left pane, inserted instance green on the right pane) rather than treated as an unchanged match.
 
 ## Markdown Rendering Requirements
 
@@ -73,6 +74,7 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - For matched-but-changed blocks, only the changed words are highlighted (unchanged words in the block stay neutral).
    - Changed words use a darker/saturated red (left) / green (right) background, distinct from the lighter whole-block add/remove highlight.
    - Blocks that differ only by whitespace/formatting are not marked as changed and add no change-navigator markers.
+   - Standalone callout/alignment boxes (`div.callout-box`) that are missing on one side or positioned differently are flagged as a delete + insert: removed instances are red on the left pane and the inserted instance is light green on the right pane (never silently unmarked).
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).
    - Corresponding paragraphs are presented next to each other.

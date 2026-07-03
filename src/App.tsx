@@ -12,7 +12,7 @@ const DEFAULT_LEFT_BASE = "http://localhost:3001";
 const DEFAULT_RIGHT_BASE = "http://localhost:3002";
 const DEFAULT_PATH = "/";
 const DEBUG_SYNC = true;
-const DIFF_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,td,th,pre,code,blockquote";
+const DIFF_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,td,th,pre,code,blockquote,div.callout-box";
 const DIFF_LOOKAHEAD_WINDOW = 24;
 
 type ComparableNode = {
