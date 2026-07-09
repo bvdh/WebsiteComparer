@@ -61,6 +61,34 @@ const writeQueryState = (mode: "push" | "replace", leftBase: string, rightBase: 
   window.history.replaceState(null, "", nextUrl);
 };
 
+const derivePageTitle = (path: string): string => {
+  const parsed = new URL(normalizeRelativePath(path), "http://local.invalid");
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const last = segments[segments.length - 1] || "index";
+  return last.replace(/\.[^.]+$/, "") || "index";
+};
+
+const deriveVersionLabel = (urlString: string): string => {
+  try {
+    const url = new URL(urlString);
+
+    if (url.hostname.includes("build")) {
+      const segments = url.pathname.split("/").filter(Boolean);
+      const branchIndex = segments.indexOf("branches");
+      if (branchIndex !== -1 && segments[branchIndex + 1]) {
+        return `${segments[branchIndex + 1]}/en`;
+      }
+      return url.hostname;
+    }
+
+    const host = url.hostname;
+    const lastDot = host.lastIndexOf(".");
+    return lastDot > 0 ? host.slice(0, lastDot) : host;
+  } catch {
+    return urlString;
+  }
+};
+
 const normalizeText = (value: string | null | undefined): string =>
   (value || "").replace(/\s+/g, " ").trim();
 
@@ -519,6 +547,13 @@ function App() {
   useEffect(() => {
     writeQueryState(urlWriteModeRef.current, leftBase, rightBase, relativePath);
     urlWriteModeRef.current = "replace";
+  }, [leftBase, relativePath, rightBase]);
+
+  useEffect(() => {
+    const pageTitle = derivePageTitle(relativePath);
+    const left = deriveVersionLabel(leftBase);
+    const right = deriveVersionLabel(rightBase);
+    document.title = `WC: ${pageTitle} ${left} vs ${right}`;
   }, [leftBase, relativePath, rightBase]);
 
   const leftSrc = useMemo(
