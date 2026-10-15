@@ -29,6 +29,11 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 8. Whole-block added or removed content (a block present on only one side) continues to use the lighter side-specific red (left) / green (right) background over the entire block.
 9. HTML blocks whose only differences are whitespace/formatting (no word-level changes) must not be marked as changed and must not create change-navigator markers.
 10. Standalone callout/notice boxes rendered as block `div` containers (for example `div.callout-box` "Ongoing alignment" notices) must participate in HTML block comparison and must not be silently skipped because they are `div` elements. When such a box is present on only one side, or appears at a non-corresponding position relative to surrounding blocks, it must be flagged as a side-specific delete + insert (removed instance red on the left pane, inserted instance green on the right pane) rather than treated as an unchanged match.
+11. HTML alignment must recover at corresponding section/entry anchors after insertions or deletions larger than the local matching window. Unchanged surviving sections and their content must remain neutral and contribute no change-navigator markers.
+12. Long-range section anchors must be unambiguous and order-preserving, using compatible heading IDs or unique heading text. Entry anchors may use corresponding site-relative link destinations. Repeated labels/links/headings must not become distant anchors, and moved callouts must not become global unchanged matches. Local ID-less heading substitutions must be same-level, with shared title text and compatible section structure.
+13. Renumbered TOC entries must align by corresponding destination rather than by displayed number or sequence position. Compare their original displayed text: only changed numbers are highlighted when titles are unchanged; genuine title changes remain highlighted. Do not ignore numeric changes in ordinary prose.
+14. Nested comparable blocks must compare each text node once. Parent-owned text remains comparable without duplicate highlighting of descendant list items, paragraphs, table cells, or code blocks. Removing/adding parent-owned text must use the lighter side-specific highlight only over that text, without tinting surviving descendants. Callouts are compared as atomic blocks.
+15. Block matching must use complete normalized text, not a truncated prefix that can hide differences later in a block. Highlighting remains word-level subject to the existing 20,000-character whole-block fallback.
 
 ## Markdown Rendering Requirements
 
@@ -55,9 +60,18 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 5. Rendering fetches should tolerate stale deep-link patterns by retrying fallback URL variants (for example `/index.html` and legacy `/en/` segments) before failing.
 6. Executable upstream page scripts must be stripped from rendered compare iframes to avoid repeated runtime script errors and unstable client-side reinitialization loops.
 7. Inline script execution hooks in upstream HTML (for example `onload`, `onclick`, and `javascript:` links) must be stripped or neutralized in rendered compare iframes.
-8. For long documents with repeated section text, page-level diff matching should use bounded local alignment to avoid overmatching distant repeated content and to keep rendering responsive.
+8. For long documents with repeated section text, page-level diff matching must use bounded local alignment between reliable order-preserving anchors to avoid overmatching distant repeated content and to keep rendering responsive. The local window must not impose a maximum size on a deleted/inserted section.
 9. For sanitized HTML pages that use Bootstrap-style header dropdown toggles, compare iframes must provide bridge-side fallback toggle behavior so menu sections can expand/collapse without upstream executable scripts.
 10. Iframe synchronization and diff routines must gracefully handle temporary or redirected cross-origin iframe states without throwing runtime `SecurityError` exceptions in the parent app.
+
+## Automated Regression Maintenance
+
+1. Every new or changed rendering behavior and every rendering bug fix must include automated tests in the same change. Add missing baseline coverage whenever existing rendering functionality is touched.
+2. Tests must exercise the production comparison code with deterministic, network-independent fixtures and assert actual highlights, unchanged-content neutrality, changed-element counts, and change-navigator marker inputs/results where relevant.
+3. Maintain tests and fixtures alongside intentional requirement changes; preserve unrelated regression cases. Never remove or weaken tests merely to hide a regression.
+4. Keep persistent coverage for large section deletion/insertion, TOC renumbering, genuine text changes, nested blocks, whitespace-only changes, repeated content, moved callouts, and repeated comparison cleanup.
+5. Use browser verification in addition to automated tests for layout, real scrolling, iframe synchronization, and visual styles; jsdom does not establish correctness of those behaviors.
+6. Run the complete `npm test` suite and `npm run build` before completion. Repository-wide testing obligations, including non-rendering functionality, are defined in `.github/copilot-instructions.md` and documented in `README.md`.
 
 ## Change Checklist (Required Before Merge)
 
@@ -75,6 +89,10 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
    - Changed words use a darker/saturated red (left) / green (right) background, distinct from the lighter whole-block add/remove highlight.
    - Blocks that differ only by whitespace/formatting are not marked as changed and add no change-navigator markers.
    - Standalone callout/alignment boxes (`div.callout-box`) that are missing on one side or positioned differently are flagged as a delete + insert: removed instances are red on the left pane and the inserted instance is light green on the right pane (never silently unmarked).
+   - Removing "EU Access Related Profiles" and "CapabilityStatements" in `artifacts-structural.html`, including more than 24 comparable blocks, leaves the surviving "Other Resource profiles" heading and unchanged table cells neutral, without change markers.
+   - Removing section 6 in `toc.html` leaves surviving entry titles neutral; renumbered sections/subsections highlight only changed numbers. Genuine entry-title changes still highlight changed words.
+   - Reverse both examples and verify right-only inserted blocks without cascading highlights.
+   - Nested selected blocks do not produce duplicate word wrappers; repeated comparison clears old artifacts and yields the same counts and markers.
 2. Verify markdown compare page:
    - Markdown is rendered (not raw source).
    - Corresponding paragraphs are presented next to each other.
@@ -88,7 +106,8 @@ Use this as a guardrail for future changes. If behavior here changes, update thi
 3. Verify large HTML page compare (for example `references.html` with many repeated list entries):
    - Diff rendering completes without excessive delay.
    - Highlighted differences remain localized instead of jumping to distant repeated sections.
-4. Run build:
+4. Run regression tests and build:
+   - `npm test`
    - `npm run build`
 
 ## Notes For Future Work

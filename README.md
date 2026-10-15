@@ -11,6 +11,43 @@ Compare two versions of a site side-by-side with synchronized scrolling and path
 - Shared back/forward navigation history.
 - 404 behavior is preserved from each target site.
 
+## Testing and regression maintenance
+
+Run the deterministic regression suite and production type-check/build:
+
+```bash
+npm test
+npm run build
+```
+
+For a focused test run, use `npm test -- src/diff/htmlComparison.test.ts`.
+Use Node 24 LTS (`nvm use` reads `.nvmrc`); the package engine requirement and
+Docker images use the same supported runtime. Patched Vitest and its compatible
+Vite/React-plugin versions require a newer runtime than the previous Node 18 setup.
+The suite uses Vitest and jsdom. Tests invoke
+production alignment, highlighting, and marker collection code, using synthetic
+fixtures in `src/diff/__fixtures__/`; they do not fetch live upstream pages.
+Coverage includes large section deletions/insertions, renumbered TOC entries,
+actual text changes, nested blocks, repeated content, moved callouts, and cleanup.
+
+Every new feature and bug fix must include automated behavioral tests in the same
+change, for frontend and server functionality alike. When changing existing
+functionality, add missing tests for its baseline behavior and the change.
+Untouched functionality is covered incrementally when modified, not through a
+mandatory full-application backfill in every change.
+
+Tests must exercise production code and assert observable outcomes, including
+unchanged behavior, rather than relying only on snapshots. Maintain fixtures,
+tests, and related requirements with intended behavior changes; never weaken or
+delete assertions just to make failing tests pass. Run focused tests during
+development and the complete suite plus build before completion.
+
+Browser checks supplement these tests for actual layout, iframe scrolling,
+synchronization, and visual styles that jsdom cannot verify. Keep network-based
+checks separate from the default suite. See
+[RENDERING_REQUIREMENTS.md](RENDERING_REQUIREMENTS.md) for rendering-specific
+requirements and the verification checklist.
+
 ## Run locally
 
 1. Install dependencies:

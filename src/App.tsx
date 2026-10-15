@@ -5,25 +5,14 @@ import { initialHistoryState, pushHistory, stepHistory, type HistoryState } from
 import { SyncController } from "./sync/SyncController";
 import { mapPathToPeer, normalizeRelativePath, toRelativePath } from "./sync/urlMapping";
 import type { PaneSide } from "./types/sync";
-import { diffWords, type Change } from "diff";
+import { clearComparisonArtifacts, compareHtmlDocuments } from "./diff/htmlComparison";
+import { collectChangeMarkersFromElements, type ChangeMarker } from "./diff/changeMarkers";
 import "./App.css";
 
 const DEFAULT_LEFT_BASE = "http://localhost:3001";
 const DEFAULT_RIGHT_BASE = "http://localhost:3002";
 const DEFAULT_PATH = "/";
 const DEBUG_SYNC = true;
-const DIFF_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,td,th,pre,code,blockquote,div.callout-box";
-const DIFF_LOOKAHEAD_WINDOW = 24;
-
-type ComparableNode = {
-  element: HTMLElement;
-  signature: string;
-};
-
-type ChangeMarker = {
-  ratio: number;
-  side: PaneSide;
-};
 
 const readInitialStateFromQuery = () => {
   if (typeof window === "undefined") {
@@ -88,9 +77,6 @@ const deriveVersionLabel = (urlString: string): string => {
     return urlString;
   }
 };
-
-const normalizeText = (value: string | null | undefined): string =>
-  (value || "").replace(/\s+/g, " ").trim();
 
 const getPathVariant = (value: string): "md" | "html" | null => {
   const parsed = new URL(normalizeRelativePath(value), "http://local.invalid");
@@ -167,176 +153,6 @@ const ensureDiffStyles = (doc: Document): void => {
   doc.head.appendChild(style);
 };
 
-const CHANGED_WORD_MAX_CHARS = 20000;
-
-type WordChangeRange = [number, number];
-
-const computeChangedWordRanges = (parts: Change[], side: PaneSide): WordChangeRange[] => {
-  const ranges: WordChangeRange[] = [];
-  let position = 0;
-
-  parts.forEach((part) => {
-    const skip = side === "right" ? part.removed : part.added;
-    if (skip) {
-      return;
-    }
-
-    const length = part.value.length;
-    const isChanged = side === "right" ? part.added : part.removed;
-    if (isChanged && length > 0) {
-      ranges.push([position, position + length]);
-    }
-    position += length;
-  });
-
-  return ranges;
-};
-
-const wrapChangedWordRanges = (
-  doc: Document,
-  root: HTMLElement,
-  ranges: WordChangeRange[],
-  className: string
-): void => {
-  if (ranges.length === 0) {
-    return;
-  }
-
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const textNodes: { node: Text; start: number; end: number }[] = [];
-  let offset = 0;
-  let current = walker.nextNode();
-  while (current) {
-    const value = current.nodeValue ?? "";
-    textNodes.push({ node: current as Text, start: offset, end: offset + value.length });
-    offset += value.length;
-    current = walker.nextNode();
-  }
-
-  textNodes.forEach(({ node, start, end }) => {
-    const overlaps = ranges
-      .map(([rangeStart, rangeEnd]): WordChangeRange => [Math.max(rangeStart, start), Math.min(rangeEnd, end)])
-      .filter(([overlapStart, overlapEnd]) => overlapEnd > overlapStart)
-      .sort((a, b) => a[0] - b[0]);
-
-    if (overlaps.length === 0) {
-      return;
-    }
-
-    const text = node.nodeValue ?? "";
-    const fragment = doc.createDocumentFragment();
-    let cursor = start;
-
-    overlaps.forEach(([overlapStart, overlapEnd]) => {
-      if (overlapStart > cursor) {
-        fragment.appendChild(doc.createTextNode(text.slice(cursor - start, overlapStart - start)));
-      }
-      const span = doc.createElement("span");
-      span.className = className;
-      span.textContent = text.slice(overlapStart - start, overlapEnd - start);
-      fragment.appendChild(span);
-      cursor = overlapEnd;
-    });
-
-    if (cursor < end) {
-      fragment.appendChild(doc.createTextNode(text.slice(cursor - start)));
-    }
-
-    node.parentNode?.replaceChild(fragment, node);
-  });
-};
-
-// Word-level highlight for a matched-but-changed block pair.
-// Returns the number of changed word ranges, or -1 when the block is too large
-// to word-diff and the caller should fall back to whole-block highlighting.
-const applyWordLevelDiff = (
-  leftDoc: Document,
-  rightDoc: Document,
-  leftElement: HTMLElement,
-  rightElement: HTMLElement
-): number => {
-  const leftText = leftElement.textContent ?? "";
-  const rightText = rightElement.textContent ?? "";
-
-  if (leftText.length > CHANGED_WORD_MAX_CHARS || rightText.length > CHANGED_WORD_MAX_CHARS) {
-    return -1;
-  }
-
-  const parts = diffWords(leftText, rightText);
-  const leftRanges = computeChangedWordRanges(parts, "left");
-  const rightRanges = computeChangedWordRanges(parts, "right");
-
-  wrapChangedWordRanges(leftDoc, leftElement, leftRanges, "compare-word-diff compare-word-diff--left-changed");
-  wrapChangedWordRanges(rightDoc, rightElement, rightRanges, "compare-word-diff compare-word-diff--right-changed");
-
-  return leftRanges.length + rightRanges.length;
-};
-
-const unwrapWordDiffSpans = (doc: Document): void => {
-  doc.querySelectorAll(".compare-word-diff").forEach((span) => {
-    const parent = span.parentNode;
-    if (!parent) {
-      return;
-    }
-
-    while (span.firstChild) {
-      parent.insertBefore(span.firstChild, span);
-    }
-    parent.removeChild(span);
-    parent.normalize();
-  });
-};
-
-const clearComparisonArtifacts = (doc: Document): void => {
-  unwrapWordDiffSpans(doc);
-  doc.querySelectorAll(".compare-diff-marker").forEach((node) => {
-    node.classList.remove(
-      "compare-diff-marker",
-      "compare-diff-marker--left-changed",
-      "compare-diff-marker--right-changed"
-    );
-  });
-};
-
-const getComparableElements = (doc: Document): HTMLElement[] =>
-  Array.from(doc.querySelectorAll<HTMLElement>(DIFF_SELECTOR)).filter((element) => {
-    if (element.closest("script, style, noscript")) {
-      return false;
-    }
-
-    return normalizeText(element.textContent).length > 0;
-  });
-
-const getElementText = (element: HTMLElement | undefined): string =>
-  normalizeText(element?.textContent);
-
-const createComparableNodes = (elements: HTMLElement[]): ComparableNode[] =>
-  elements.map((element) => {
-    const text = getElementText(element);
-    const compactText = text.length > 320 ? `${text.slice(0, 320)}...` : text;
-
-    return {
-      element,
-      signature: `${element.tagName}:${compactText}`,
-    };
-  });
-
-const findMatchingOffset = (
-  nodes: ComparableNode[],
-  startIndex: number,
-  targetSignature: string,
-  windowSize: number
-): number => {
-  const lastIndex = Math.min(nodes.length, startIndex + windowSize);
-  for (let index = startIndex; index < lastIndex; index += 1) {
-    if (nodes[index].signature === targetSignature) {
-      return index - startIndex;
-    }
-  }
-
-  return -1;
-};
-
 const getScrollableMetrics = (doc: Document) => {
   const scrollElement = doc.scrollingElement || doc.documentElement;
   const viewportHeight =
@@ -357,30 +173,6 @@ const getDocumentScrollRatio = (doc: Document): number => {
 
   return Math.min(Math.max(scrollElement.scrollTop / maxScroll, 0), 1);
 };
-
-const collectRatiosFromElements = (doc: Document, elements: HTMLElement[]): number[] => {
-  const { maxScroll } = getScrollableMetrics(doc);
-  if (maxScroll <= 0 || elements.length === 0) {
-    return [];
-  }
-
-  const scrollTop = doc.defaultView?.scrollY || (doc.scrollingElement?.scrollTop ?? 0);
-  const ratios = new Set<number>();
-
-  elements.forEach((element) => {
-    const absoluteTop = element.getBoundingClientRect().top + scrollTop;
-    const ratio = Math.min(Math.max(absoluteTop / maxScroll, 0), 1);
-    ratios.add(Math.round(ratio * 1000) / 1000);
-  });
-
-  return Array.from(ratios).sort((a, b) => a - b);
-};
-
-const collectChangeMarkersFromElements = (
-  doc: Document,
-  elements: HTMLElement[],
-  side: PaneSide
-): ChangeMarker[] => collectRatiosFromElements(doc, elements).map((ratio) => ({ ratio, side }));
 
 const mergeChangeMarkers = (...markerGroups: ChangeMarker[][]): ChangeMarker[] => {
   const merged = new Map<string, ChangeMarker>();
@@ -667,103 +459,9 @@ function App() {
 
       ensureDiffStyles(leftDoc);
       ensureDiffStyles(rightDoc);
-      clearComparisonArtifacts(rightDoc);
-      clearComparisonArtifacts(leftDoc);
-
-      const leftElements = getComparableElements(leftDoc);
-      const rightElements = getComparableElements(rightDoc);
-      const leftNodes = createComparableNodes(leftElements);
-      const rightNodes = createComparableNodes(rightElements);
-      const changedLeftElements: HTMLElement[] = [];
-      const changedRightElements: HTMLElement[] = [];
-
-      let nextDiffCount = 0;
-      let leftIndex = 0;
-      let rightIndex = 0;
-
-      while (leftIndex < leftNodes.length && rightIndex < rightNodes.length) {
-        const leftNode = leftNodes[leftIndex];
-        const rightNode = rightNodes[rightIndex];
-
-        if (leftNode.signature === rightNode.signature) {
-          leftIndex += 1;
-          rightIndex += 1;
-          continue;
-        }
-
-        const rightOffset = findMatchingOffset(
-          rightNodes,
-          rightIndex + 1,
-          leftNode.signature,
-          DIFF_LOOKAHEAD_WINDOW
-        );
-        const leftOffset = findMatchingOffset(
-          leftNodes,
-          leftIndex + 1,
-          rightNode.signature,
-          DIFF_LOOKAHEAD_WINDOW
-        );
-
-        if (rightOffset >= 0 && (leftOffset < 0 || rightOffset < leftOffset)) {
-          for (let marker = rightIndex; marker < rightIndex + rightOffset + 1; marker += 1) {
-            const element = rightNodes[marker].element;
-            element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
-            changedRightElements.push(element);
-            nextDiffCount += 1;
-          }
-          rightIndex += rightOffset + 1;
-          continue;
-        }
-
-        if (leftOffset >= 0 && (rightOffset < 0 || leftOffset < rightOffset)) {
-          for (let marker = leftIndex; marker < leftIndex + leftOffset + 1; marker += 1) {
-            const element = leftNodes[marker].element;
-            element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
-            changedLeftElements.push(element);
-            nextDiffCount += 1;
-          }
-          leftIndex += leftOffset + 1;
-          continue;
-        }
-
-        const wordChanges = applyWordLevelDiff(leftDoc, rightDoc, leftNode.element, rightNode.element);
-
-        if (wordChanges === 0) {
-          // Whitespace/formatting-only difference: treat the pair as unchanged so
-          // it does not produce a phantom highlight or change-navigator marker.
-          leftIndex += 1;
-          rightIndex += 1;
-          continue;
-        }
-
-        if (wordChanges < 0) {
-          // Block too large to word-diff: fall back to whole-block highlight.
-          leftNode.element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
-          rightNode.element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
-        }
-
-        changedLeftElements.push(leftNode.element);
-        changedRightElements.push(rightNode.element);
-        nextDiffCount += 2;
-        leftIndex += 1;
-        rightIndex += 1;
-      }
-
-      for (; leftIndex < leftNodes.length; leftIndex += 1) {
-        const element = leftNodes[leftIndex].element;
-        element.classList.add("compare-diff-marker", "compare-diff-marker--left-changed");
-        changedLeftElements.push(element);
-        nextDiffCount += 1;
-      }
-
-      for (; rightIndex < rightNodes.length; rightIndex += 1) {
-        const element = rightNodes[rightIndex].element;
-        element.classList.add("compare-diff-marker", "compare-diff-marker--right-changed");
-        changedRightElements.push(element);
-        nextDiffCount += 1;
-      }
-
-      setDiffCount(nextDiffCount);
+      const comparison = compareHtmlDocuments(leftDoc, rightDoc, leftBase, rightBase);
+      const { changedLeftElements, changedRightElements } = comparison;
+      setDiffCount(comparison.diffCount);
       setChangeMarkers(
         mergeChangeMarkers(
           collectChangeMarkersFromElements(leftDoc, changedLeftElements, "left"),
@@ -773,9 +471,9 @@ function App() {
       if (DEBUG_SYNC) {
         // eslint-disable-next-line no-console
         console.debug("[compare-diff] updated", {
-          leftCount: leftElements.length,
-          rightCount: rightElements.length,
-          diffCount: nextDiffCount,
+          leftCount: comparison.leftCount,
+          rightCount: comparison.rightCount,
+          diffCount: comparison.diffCount,
         });
       }
     } catch (error) {
@@ -785,7 +483,7 @@ function App() {
         console.debug("[compare-diff] failed", error);
       }
     }
-  }, []);
+  }, [leftBase, rightBase]);
 
   const alignMarkdownBlocksAcrossPanes = useCallback(() => {
     const leftDoc = getIframeDocumentSafe(leftRef.current);
